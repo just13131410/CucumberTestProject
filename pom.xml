@@ -53,13 +53,11 @@
     </dependency>
 
     <dependency>
-      <groupId>org.wiremock</groupId>
-      <artifactId>wiremock</artifactId>
-      <version>3.13.2</version>
-      <scope>test</scope>
+      <groupId>com.deque.html.axe-core</groupId>
+      <artifactId>playwright</artifactId>
+      <version>4.11.0</version>
     </dependency>
 
-    <!-- Alternative: leichtgewichtiges Simple-Backend -->
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-simple</artifactId>
@@ -101,7 +99,6 @@
       <scope>test</scope>
     </dependency>
 
-    <!-- Allure Cucumber Adapter: exclude transitive gherkin to avoid incompatible version -->
     <dependency>
       <groupId>io.qameta.allure</groupId>
       <artifactId>allure-cucumber7-jvm</artifactId>
@@ -115,21 +112,19 @@
       </exclusions>
     </dependency>
 
-    <!-- Füge gherkin explizit hinzu; Version wird durch das cucumber-bom gesteuert -->
     <dependency>
       <groupId>io.cucumber</groupId>
       <artifactId>gherkin</artifactId>
       <scope>test</scope>
     </dependency>
+
     <dependency>
       <groupId>io.qameta.allure</groupId>
       <artifactId>allure-java-commons</artifactId>
       <version>${allure.version}</version>
       <scope>test</scope>
     </dependency>
-  </dependencies>
-
-
+    </dependencies>
   <build>
     <resources>
       <resource>

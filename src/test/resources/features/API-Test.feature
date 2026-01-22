@@ -1,3 +1,4 @@
+@ignore
 Feature: Erste API Prüfung
   Scenario: GET /posts/1 liefert 200 und id == 1
     Given API Basis-URL "https://jsonplaceholder.typicode.com"

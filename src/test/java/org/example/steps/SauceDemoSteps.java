@@ -8,13 +8,17 @@ import io.cucumber.java.Scenario;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
+import org.example.hooks.AxeReportHook;
 import org.example.pages.BasePage;
 import org.example.pages.CheckoutPage;
 import org.example.pages.ItemsPage;
 import org.example.pages.LoginPage;
 import org.example.pages.*;
 
+import java.io.IOException;
+
 import static org.example.hooks.TakeScreenshots.captureScreenshot;
+import static org.junit.Assert.assertEquals;
 
 public class SauceDemoSteps extends BasePage {
 
@@ -41,9 +45,11 @@ public class SauceDemoSteps extends BasePage {
     }
 
     @When("User logged in the app using username {string} and password {string}")
-    public void user_logged_in_the_app_using_username_and_password(String username, String password) {
+    public void user_logged_in_the_app_using_username_and_password(String username, String password) throws IOException {
         loginPage.login(username, password);
         captureScreenshot(page, "LoginAttempt");
+        // Axe Accessibility Scan
+        AxeReportHook.runAndSave(page, "homepage-audit{}".replace("{}", System.currentTimeMillis() + ""));
     }
 
     @Then("^user should be able to log in$")

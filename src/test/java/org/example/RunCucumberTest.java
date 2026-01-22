@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/* Statische Initialisierung: erstellt `target/allure-results` vor Testausführung */
 @RunWith(Cucumber.class)
 @CucumberOptions(
         features = "src/test/resources/features",

@@ -181,7 +181,6 @@
             <executionMode>Local</executionMode>
             <browser>Chromium</browser>
             <applicationUrl>https://www.saucedemo.com/</applicationUrl>
-            <remoteUrl></remoteUrl>
           </systemPropertyVariables>
         </configuration>
       </plugin>

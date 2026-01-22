@@ -8,6 +8,7 @@ import io.restassured.response.Response;
 import io.restassured.filter.log.RequestLoggingFilter;
 import io.restassured.filter.log.ResponseLoggingFilter;
 import io.qameta.allure.Allure;
+import org.example.utils.ConfigReader;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -22,9 +23,11 @@ public class ApiSteps {
     private String baseUrl;
     private Response response;
 
-    @Given("API Basis-URL {string}")
-    public void setBaseUrl(String url) {
-        this.baseUrl = url;
+    @Given("API Basis-URL ist gesetzt")
+    public void setBaseUrl() {
+        this.baseUrl = ConfigReader.get("apiURL", "default-token");
+        // ... browser navigation logic ...
+        Allure.step("Base URl gesetzt auf: " + this.baseUrl);
     }
 
     @When("ich GET an {string} ausführe")

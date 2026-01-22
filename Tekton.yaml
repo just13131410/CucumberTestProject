@@ -1,0 +1,9 @@
+- name: upload-to-zephyr
+  image: curlimages/curl:latest
+  script: |
+    # Credentials von Vault (als Env-Vars gemappt)
+    ZEPHYR_TOKEN=$(cat /vault/secrets/zephyr-token) 
+    
+    curl -X POST "https://zephyrscale.com" \
+      -H "Authorization: Bearer $ZEPHYR_TOKEN" \
+      -F "file=@target/cucumber.json"

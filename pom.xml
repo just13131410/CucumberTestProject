@@ -182,6 +182,7 @@
             <browser>Chromium</browser>
             <applicationUrl>https://www.saucedemo.com/</applicationUrl>
           </systemPropertyVariables>
+
         </configuration>
       </plugin>
     </plugins>

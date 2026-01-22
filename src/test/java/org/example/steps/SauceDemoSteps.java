@@ -8,18 +8,21 @@ import io.cucumber.java.Scenario;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
+import io.qameta.allure.Allure;
 import org.example.hooks.AxeReportHook;
 import org.example.pages.BasePage;
 import org.example.pages.CheckoutPage;
 import org.example.pages.ItemsPage;
 import org.example.pages.LoginPage;
 import org.example.pages.*;
+import org.example.utils.ConfigReader;
 
 import static org.example.hooks.TakeScreenshots.captureScreenshot;
 
 public class SauceDemoSteps extends BasePage {
+    String url = ConfigReader.get("baseUrl", "https://www.saucedemo.com/");
 
-
+    //String apiToken = ConfigReader.get("ZEPHYR_TOKEN", "default-token");
     LoginPage loginPage;
     ItemsPage itemsPage;
     CheckoutPage checkoutPage;
@@ -28,6 +31,7 @@ public class SauceDemoSteps extends BasePage {
 
     @Given("^User launched SwagLabs application$")
     public void user_launched_swaglabs_application() {
+        Allure.step("GUI Base URl gesetzt auf: " + this.url);
         try {
             page = createPlaywrightPageInstance(System.getProperty("browser"));
             page.navigate(System.getProperty("applicationUrl"));

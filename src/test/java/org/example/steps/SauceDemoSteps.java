@@ -1,18 +1,22 @@
 package org.example.steps;
 
-import com.microsoft.playwright.Browser;
-import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
 
 import io.cucumber.java.After;
+import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
-import pages.*;
+import org.example.pages.BasePage;
+import org.example.pages.CheckoutPage;
+import org.example.pages.ItemsPage;
+import org.example.pages.LoginPage;
+import org.example.pages.*;
 
-public class Sauce extends BasePage{
+import static org.example.hooks.TakeScreenshots.captureScreenshot;
+
+public class SauceDemoSteps extends BasePage {
 
 
     LoginPage loginPage;
@@ -39,6 +43,7 @@ public class Sauce extends BasePage{
     @When("User logged in the app using username {string} and password {string}")
     public void user_logged_in_the_app_using_username_and_password(String username, String password) {
         loginPage.login(username, password);
+        captureScreenshot(page, "LoginAttempt");
     }
 
     @Then("^user should be able to log in$")
@@ -54,11 +59,13 @@ public class Sauce extends BasePage{
     @When("User adds {string} product to the cart")
     public void user_adds_product_to_the_cart(String product) {
         itemsPage.orderProduct(product);
+        captureScreenshot(page, "OrderProduct");
     }
 
     @When("User enters Checkout details with {string}, {string}, {string}")
     public void user_enters_Checkout_details_with(String FirstName, String LastName, String Zipcode) {
         checkoutPage.fillCheckoutDetails(FirstName, LastName, Zipcode);
+        captureScreenshot(page, "fillCheckoutDetails");
     }
 
     @When("User completes Checkout process")
@@ -72,12 +79,16 @@ public class Sauce extends BasePage{
     }
 
     @After
-    public void tearDown(Scenario scenario) {
+    public void tearDown() {
         if (browser != null) {
             browser.close();
         }
         if (page != null) {
             page.close();
         }
+    }
+    @Before
+    public void setUp(Scenario scenario) {
+        System.out.println("Starting Scenario: " + scenario.getName());
     }
 }

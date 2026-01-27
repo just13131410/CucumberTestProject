@@ -12,8 +12,8 @@ import java.nio.file.Path;
 
 @RunWith(Cucumber.class)
 @CucumberOptions(
-        features = "src/test/resources/features",
-        glue = "org.example.steps",
+        features = "classpath:features",
+        glue = "org.example",
         plugin = {"pretty", "io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm", "html:target/cucumber-reports/Cucumber.html", "json:target/cucumber-reports/Cucumber.json"}
 )
 public class RunCucumberTest {

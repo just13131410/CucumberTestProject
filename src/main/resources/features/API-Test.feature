@@ -1,4 +1,4 @@
-@T-3511
+@T-3511 @API-Test @SmokeTest
 Feature: Erste API Prüfung
   Scenario: GET /posts/1 liefert 200 und id == 1
     Given API Basis-URL ist gesetzt

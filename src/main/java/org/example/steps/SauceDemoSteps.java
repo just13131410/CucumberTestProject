@@ -32,21 +32,26 @@ public class SauceDemoSteps extends BasePage {
     @Given("^User launched SwagLabs application$")
     public void user_launched_swaglabs_application() {
         Allure.step("GUI Base URl gesetzt auf: " + this.url);
-        try {
-            page = createPlaywrightPageInstance(System.getProperty("browser"));
-            page.navigate(System.getProperty("applicationUrl"));
-            loginPage = new LoginPage(page);
-            itemsPage = new ItemsPage(page);
-            checkoutPage = new CheckoutPage(page);
 
+        String browserName = System.getProperty("browser"); // may be null outside Surefire -> BasePage defaults to chromium
+        String targetUrl = System.getProperty("applicationUrl");
+        if (targetUrl == null || targetUrl.isBlank()) {
+            targetUrl = this.url; // use config.properties baseUrl as the long-term stable default
         }
-        catch (Exception e) {
-            e.printStackTrace();
-        }
+
+        page = createPlaywrightPageInstance(browserName);
+        page.navigate(targetUrl);
+
+        loginPage = new LoginPage(page);
+        itemsPage = new ItemsPage(page);
+        checkoutPage = new CheckoutPage(page);
     }
 
     @When("User logged in the app using username {string} and password {string}")
     public void user_logged_in_the_app_using_username_and_password(String username, String password) {
+        if (loginPage == null) {
+            throw new IllegalStateException("LoginPage was not initialized. Did 'User launched SwagLabs application' fail?");
+        }
         loginPage.login(username, password);
         captureScreenshot(page, "LoginAttempt");
         // Axe Accessibility Scan

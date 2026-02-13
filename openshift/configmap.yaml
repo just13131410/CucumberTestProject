@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cucumber-test-config
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  TEST_RESULTS_PATH: "/app/test-results"
+  PLAYWRIGHT_BROWSERS_PATH: "/app/browsers"
+  CUCUMBER_PARALLEL_THREADS: "4"
+  # Override these per environment:
+  BASE_URL: "https://your-application-under-test.example.com"
+  API_URL: "https://your-api-under-test.example.com"
+  # Actuator on separate port
+  MANAGEMENT_SERVER_PORT: "8081"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"

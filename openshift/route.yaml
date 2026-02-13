@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: cucumber-test-service
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  to:
+    kind: Service
+    name: cucumber-test-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

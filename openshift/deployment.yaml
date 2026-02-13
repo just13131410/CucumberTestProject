@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cucumber-test-service
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cucumber-test-service
+  template:
+    metadata:
+      labels:
+        app: cucumber-test-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # OpenShift assigns arbitrary UID; do not hardcode runAsUser
+      containers:
+        - name: cucumber-test-service
+          image: image-registry.openshift-image-registry.svc:5000/test-automation/cucumber-test-service:latest
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: actuator
+              containerPort: 8081
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: cucumber-test-config
+            - secretRef:
+                name: cucumber-test-secrets
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+          # Liveness: is the container alive?
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: actuator
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness: is the container ready to serve traffic?
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: actuator
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Startup: give Spring Boot + browsers time to initialize
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: actuator
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+          volumeMounts:
+            - name: test-results
+              mountPath: /app/test-results
+      volumes:
+        - name: test-results
+          persistentVolumeClaim:
+            claimName: test-results-pvc

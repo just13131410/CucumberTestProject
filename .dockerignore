@@ -1,0 +1,12 @@
+target/
+.git/
+.idea/
+*.iml
+*.ipr
+*.iws
+.allure/
+node_modules/
+.mvn/repository/
+*.md
+.dockerignore
+Dockerfile

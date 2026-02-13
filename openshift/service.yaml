@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cucumber-test-service
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  type: ClusterIP
+  selector:
+    app: cucumber-test-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: actuator
+      port: 8081
+      targetPort: actuator
+      protocol: TCP

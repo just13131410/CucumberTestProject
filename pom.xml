@@ -36,6 +36,7 @@
     <!-- Reporting -->
     <allure.version>2.32.0</allure.version>
     <aspectj.version>1.9.21</aspectj.version>
+    <lombok.version>1.18.36</lombok.version>
 
     <!-- Test Configuration -->
     <parallel.threads>4</parallel.threads>
@@ -178,6 +179,7 @@
     <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
       <optional>true</optional>
     </dependency>
     <dependency>
@@ -270,6 +272,13 @@
           <source>${java.version}</source>
           <target>${java.version}</target>
           <parameters>true</parameters>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
         </configuration>
       </plugin>
 

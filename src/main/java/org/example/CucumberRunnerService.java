@@ -1,6 +1,9 @@
 package org.example;
 
 import io.cucumber.core.cli.Main;
+import io.qameta.allure.Allure;
+import io.qameta.allure.AllureLifecycle;
+import io.qameta.allure.FileSystemResultsWriter;
 import org.example.cucumber.context.TestContext;
 import org.springframework.stereotype.Service;
 
@@ -44,8 +47,11 @@ public class CucumberRunnerService {
             Files.createDirectories(screenshotsDir);
             Files.createDirectories(axeResultDir);
 
-            // Set allure results directory for this run
+            // Reset Allure lifecycle with the correct output directory for this run.
+            // The AllureLifecycle is a singleton that caches its writer on first init,
+            // so we must replace it before each run to write to the new runId directory.
             System.setProperty("allure.results.directory", allureResults.toString());
+            Allure.setLifecycle(new AllureLifecycle(new FileSystemResultsWriter(allureResults)));
 
             // Build Cucumber CLI arguments
             var argsList = new java.util.ArrayList<String>();

@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: Build
 # ============================================================
-FROM registry.access.redhat.com/ubi9/openjdk-17:1.18 AS builder
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.18 AS builder
 
 USER root
 WORKDIR /build
@@ -23,9 +23,9 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.3
 
 USER root
 
-# Install JRE 17 and Chromium system dependencies
+# Install JRE 21 and Chromium system dependencies
 RUN microdnf install -y \
-    java-17-openjdk-headless \
+    java-21-openjdk-headless \
     # Chromium dependencies
     nss \
     atk \

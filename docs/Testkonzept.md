@@ -37,7 +37,7 @@ Die zu testenden Systeme (System Under Test, SUT) sind:
 
 ### 1.2 Testinfrastruktur – Cucumber Test Service
 
-Die automatisierten Tests werden nicht direkt in den Projekten der Testobjekte ausgefuehrt, sondern zentral ueber den **Cucumber Test Service** gesteuert. Dieser ist ein eigenstaendiger Spring-Boot-3-Microservice (Java 17), der als Testinfrastruktur in OpenShift betrieben wird.
+Die automatisierten Tests werden nicht direkt in den Projekten der Testobjekte ausgefuehrt, sondern zentral ueber den **Cucumber Test Service** gesteuert. Dieser ist ein eigenstaendiger Spring-Boot-4-Microservice (Java 21), der als Testinfrastruktur in OpenShift betrieben wird.
 
 **Funktionsweise:** Die CI/CD-Pipelines der Testobjekte (Backend-Verbund, Logviewer) rufen nach dem Deployment den Cucumber Test Service ueber seine REST-API auf. Der Service fuehrt die im Repository hinterlegten Cucumber-Tests (`src/main/resources/features`) gegen die deployten Testobjekte aus und stellt die Ergebnisse bereit.
 

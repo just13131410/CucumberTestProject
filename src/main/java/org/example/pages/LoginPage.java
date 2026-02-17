@@ -1,6 +1,6 @@
 package org.example.pages;
 
-import org.junit.Assert;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microsoft.playwright.Page;
 
@@ -22,7 +22,7 @@ public class LoginPage {
 
     public void loginFailed() {
         boolean visible = page.isVisible("//h3[text()='Epic sadface: Sorry, this user has been locked out.']");
-        Assert.assertTrue(visible);
+        assertTrue(visible);
     }
 
 }

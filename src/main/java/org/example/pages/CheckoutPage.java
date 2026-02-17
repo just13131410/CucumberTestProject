@@ -1,6 +1,6 @@
 package org.example.pages;
 
-import org.junit.Assert;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microsoft.playwright.Page;
 
@@ -23,6 +23,6 @@ public class CheckoutPage extends BasePage{
     }
 
     public void checkoutSuccessful() {
-        Assert.assertTrue(page.isVisible("text=THANK YOU FOR YOUR ORDER"));
+        assertTrue(page.isVisible("text=THANK YOU FOR YOUR ORDER"));
     }
 }

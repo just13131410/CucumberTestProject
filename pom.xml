@@ -125,23 +125,11 @@
       <version>4.11.1</version>
     </dependency>
 
-    <!-- JUnit 4 (used by page object assertions) -->
-    <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>4.13.2</version>
-    </dependency>
-
     <!-- Selenium WebDriver (fuer UI-Tests) -->
     <dependency>
       <groupId>org.seleniumhq.selenium</groupId>
       <artifactId>selenium-java</artifactId>
       <version>${selenium.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>io.github.bonigarcia</groupId>
-      <artifactId>webdrivermanager</artifactId>
-      <version>5.6.3</version>
     </dependency>
 
     <!-- REST Assured (fuer API-Tests) -->
@@ -168,27 +156,12 @@
       <version>${allure.version}</version>
     </dependency>
 
-    <!-- Test Data Generation -->
-    <dependency>
-      <groupId>com.github.javafaker</groupId>
-      <artifactId>javafaker</artifactId>
-      <version>1.0.2</version>
-    </dependency>
-
     <!-- Utilities -->
     <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
       <version>${lombok.version}</version>
       <optional>true</optional>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.commons</groupId>
-      <artifactId>commons-lang3</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>com.fasterxml.jackson.dataformat</groupId>
-      <artifactId>jackson-dataformat-yaml</artifactId>
     </dependency>
 
     <!-- Environment Configuration -->
@@ -204,13 +177,6 @@
       <artifactId>slf4j-api</artifactId>
     </dependency>
 
-    <!-- AWS SDK (für S3-kompatiblen Storage) -->
-    <dependency>
-      <groupId>software.amazon.awssdk</groupId>
-      <artifactId>s3</artifactId>
-      <version>2.23.9</version>
-    </dependency>
-
     <!-- OpenAPI Documentation -->
     <dependency>
       <groupId>org.springdoc</groupId>
@@ -224,19 +190,6 @@
       <artifactId>spring-boot-starter-test</artifactId>
     </dependency>
 
-    <!-- AssertJ für bessere Assertions -->
-    <dependency>
-      <groupId>org.assertj</groupId>
-      <artifactId>assertj-core</artifactId>
-      <scope>test</scope>
-    </dependency>
-
-    <!-- Awaitility für async Testing -->
-    <dependency>
-      <groupId>org.awaitility</groupId>
-      <artifactId>awaitility</artifactId>
-      <scope>test</scope>
-    </dependency>
   </dependencies>
 
   <build>

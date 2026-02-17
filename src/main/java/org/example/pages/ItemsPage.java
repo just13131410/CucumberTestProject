@@ -1,6 +1,6 @@
 package org.example.pages;
 
-import org.junit.Assert;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microsoft.playwright.Page;
 
@@ -15,11 +15,11 @@ public class ItemsPage extends BasePage {
     public void orderProduct(String ProductName) {
         page.click("//div[text()='" + ProductName + "']/following::button[1]");
         page.click("#shopping_cart_container > a");
-        Assert.assertTrue(page.isVisible("text="+ProductName));
+        assertTrue(page.isVisible("text="+ProductName));
         page.click("[data-test=\"checkout\"]");
     }
 
     public void loginSuccessful() {
-        Assert.assertTrue(page.isVisible("text=Products"));
+        assertTrue(page.isVisible("text=Products"));
     }
 }

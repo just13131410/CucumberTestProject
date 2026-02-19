@@ -1,5 +1,6 @@
 package org.example.cucumber.controller;
 
+import org.example.cucumber.model.CombinedReportRequest;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
@@ -243,6 +244,53 @@ public class TestExecutionController {
 
         return deleted ? ResponseEntity.noContent().build()
                 : ResponseEntity.notFound().build();
+    }
+
+    /**
+     * Listet alle verfuegbaren Test-Runs auf dem Dateisystem
+     *
+     * @return Liste der Run-IDs
+     */
+    @GetMapping(value = "/runs",
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Verfuegbare Runs auflisten",
+            description = "Listet alle Test-Runs auf, die Allure-Ergebnisse enthalten")
+    @ApiResponse(responseCode = "200", description = "Liste erfolgreich abgerufen")
+    public ResponseEntity<List<UUID>> listAvailableRuns() {
+
+        log.debug("Listing available test runs");
+
+        List<UUID> runs = testExecutionService.listAvailableRuns();
+        return ResponseEntity.ok(runs);
+    }
+
+    /**
+     * Generiert einen kombinierten Allure-Report ueber mehrere Runs
+     *
+     * @param request Optionaler Request-Body mit Run-IDs
+     * @return URL zum generierten kombinierten Report
+     */
+    @PostMapping(value = "/report/combined/generate",
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Kombinierten Allure-Report generieren",
+            description = "Generiert einen Allure-Report ueber mehrere Test-Runs. Ohne Body oder leere runIds = alle Runs.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Report erfolgreich generiert"),
+            @ApiResponse(responseCode = "404", description = "Keine Runs gefunden oder Allure CLI nicht verfuegbar"),
+            @ApiResponse(responseCode = "500", description = "Fehler bei der Report-Generierung")
+    })
+    public ResponseEntity<Map<String, String>> generateCombinedAllureReport(
+            @RequestBody(required = false) CombinedReportRequest request) {
+
+        List<UUID> runIds = (request != null) ? request.getRunIds() : null;
+        log.info("Generating combined Allure report for runIds: {}", runIds);
+
+        return testExecutionService.generateCombinedAllureReport(runIds)
+                .map(url -> ResponseEntity.ok(Map.of(
+                        "reportUrl", url,
+                        "message", "Combined Allure report successfully generated"
+                )))
+                .orElse(ResponseEntity.notFound().build());
     }
 
     /**

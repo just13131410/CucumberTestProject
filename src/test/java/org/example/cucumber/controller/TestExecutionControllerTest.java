@@ -295,4 +295,79 @@ class TestExecutionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalRuns").value(5));
     }
+
+    // --- GET /api/v1/test/runs ---
+
+    @Test
+    void listAvailableRuns_Returns200() throws Exception {
+        UUID run1 = UUID.randomUUID();
+        UUID run2 = UUID.randomUUID();
+
+        when(testExecutionService.listAvailableRuns())
+                .thenReturn(List.of(run1, run2));
+
+        mockMvc.perform(get("/api/v1/test/runs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0]").value(run1.toString()))
+                .andExpect(jsonPath("$[1]").value(run2.toString()));
+    }
+
+    @Test
+    void listAvailableRuns_Empty_Returns200() throws Exception {
+        when(testExecutionService.listAvailableRuns())
+                .thenReturn(List.of());
+
+        mockMvc.perform(get("/api/v1/test/runs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    // --- POST /api/v1/test/report/combined/generate ---
+
+    @Test
+    void generateCombinedReport_WithRunIds_Returns200() throws Exception {
+        when(testExecutionService.generateCombinedAllureReport(any()))
+                .thenReturn(Optional.of("/reports/combined/allure-report/index.html"));
+
+        String requestJson = """
+                {
+                    "runIds": ["550e8400-e29b-41d4-a716-446655440000"]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/test/report/combined/generate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportUrl").value("/reports/combined/allure-report/index.html"))
+                .andExpect(jsonPath("$.message").value("Combined Allure report successfully generated"));
+    }
+
+    @Test
+    void generateCombinedReport_WithoutBody_Returns200() throws Exception {
+        when(testExecutionService.generateCombinedAllureReport(null))
+                .thenReturn(Optional.of("/reports/combined/allure-report/index.html"));
+
+        mockMvc.perform(post("/api/v1/test/report/combined/generate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportUrl").value("/reports/combined/allure-report/index.html"));
+    }
+
+    @Test
+    void generateCombinedReport_NoRunsAvailable_Returns404() throws Exception {
+        when(testExecutionService.generateCombinedAllureReport(any()))
+                .thenReturn(Optional.empty());
+
+        String requestJson = """
+                {
+                    "runIds": []
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/test/report/combined/generate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson))
+                .andExpect(status().isNotFound());
+    }
 }

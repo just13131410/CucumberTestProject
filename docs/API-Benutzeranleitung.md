@@ -16,6 +16,8 @@
    - [Test abbrechen](#8-test-ausfuehrung-abbrechen)
    - [Test loeschen](#9-test-ausfuehrung-loeschen)
    - [Statistiken](#10-statistiken-abrufen)
+   - [Verfuegbare Runs auflisten](#11-verfuegbare-runs-auflisten)
+   - [Kombinierten Report generieren](#12-kombinierten-allure-report-generieren)
 5. [Typischer Workflow](#typischer-workflow)
 6. [Parallele Ausfuehrung](#parallele-ausfuehrung-mehrere-teams)
 7. [Verfuegbare Tags](#verfuegbare-test-tags)
@@ -430,6 +432,91 @@ curl http://localhost:8080/api/v1/test/statistics?environment=staging
 
 ---
 
+### 11. Verfuegbare Runs auflisten
+
+Listet alle Test-Runs auf, die Allure-Ergebnisse auf dem Dateisystem enthalten. Nuetzlich, um Run-IDs fuer den kombinierten Report auszuwaehlen.
+
+**Request:**
+```
+GET /api/v1/test/runs
+```
+
+**Beispiel:**
+```bash
+curl http://localhost:8080/api/v1/test/runs
+```
+
+**Response (200):**
+```json
+[
+  "550e8400-e29b-41d4-a716-446655440000",
+  "660f9511-f39c-52e5-b827-557766551111"
+]
+```
+
+**Hinweise:**
+- Es werden nur Runs zurueckgegeben, die ein `allure-results/`-Verzeichnis enthalten
+- Die Liste basiert auf dem Dateisystem, nicht auf dem In-Memory-Status
+
+---
+
+### 12. Kombinierten Allure-Report generieren
+
+Generiert einen uebergreifenden Allure-Report ueber mehrere Test-Runs. Der kombinierte Report wird unter `/reports/combined/allure-report/index.html` bereitgestellt.
+
+**Request:**
+```
+POST /api/v1/test/report/combined/generate
+Content-Type: application/json
+```
+
+**Request Body (optional):**
+
+| Feld     | Typ             | Pflicht | Beschreibung                                        |
+|----------|-----------------|---------|-----------------------------------------------------|
+| `runIds` | Liste (UUIDs)   | Nein    | Run-IDs fuer den Report. Leer oder ohne Body = alle  |
+
+**Beispiel - Alle Runs kombinieren:**
+```bash
+curl -X POST http://localhost:8080/api/v1/test/report/combined/generate
+```
+
+**Beispiel - Bestimmte Runs kombinieren:**
+```bash
+curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "runIds": [
+      "550e8400-e29b-41d4-a716-446655440000",
+      "660f9511-f39c-52e5-b827-557766551111"
+    ]
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "reportUrl": "/reports/combined/allure-report/index.html",
+  "message": "Combined Allure report successfully generated"
+}
+```
+
+**Hinweise:**
+- Ohne Request-Body oder mit leerer `runIds`-Liste werden alle verfuegbaren Runs kombiniert
+- **Voraussetzung:** Allure CLI muss auf dem Server installiert sein
+- Der Report ist sofort unter der zurueckgegebenen URL im Browser aufrufbar
+- Bei erneuter Generierung wird der vorherige kombinierte Report ueberschrieben
+- Nuetzlich fuer Sprint-Reports oder teamuebergreifende Auswertungen
+
+**Fehler:**
+
+| Code | Bedeutung                                      |
+|------|-------------------------------------------------|
+| 404  | Keine Runs gefunden oder Allure CLI nicht verfuegbar |
+| 500  | Fehler bei Report-Generierung                  |
+
+---
+
 ## Typischer Workflow
 
 ```
@@ -482,6 +569,25 @@ echo "Allure-Report verfuegbar unter: $REPORT_URL"
 # 4. Optional: JSON-Report herunterladen
 curl -s http://localhost:8080/api/v1/test/report/$RUN_ID > report.json
 echo "JSON-Report gespeichert: report.json"
+```
+
+### Kombinierter Report ueber mehrere Runs
+
+```bash
+# 1. Verfuegbare Runs auflisten
+curl -s http://localhost:8080/api/v1/test/runs
+# --> ["550e8400-...", "660f9511-..."]
+
+# 2. Kombinierten Report generieren (alle Runs)
+curl -s -X POST http://localhost:8080/api/v1/test/report/combined/generate
+
+# Oder: Nur bestimmte Runs kombinieren
+curl -s -X POST http://localhost:8080/api/v1/test/report/combined/generate \
+  -H "Content-Type: application/json" \
+  -d '{"runIds": ["550e8400-...", "660f9511-..."]}'
+
+# 3. Report im Browser oeffnen
+# --> http://localhost:8080/reports/combined/allure-report/index.html
 ```
 
 ---

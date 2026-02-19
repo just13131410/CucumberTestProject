@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -305,6 +306,114 @@ public class TestExecutionService {
                 "successRate", total > 0 ? (completed * 100.0 / total) : 0.0,
                 "maxConcurrentRuns", MAX_CONCURRENT_RUNS
         );
+    }
+
+    public List<UUID> listAvailableRuns() {
+        Path basePath = getBaseResultsPath();
+        if (!Files.exists(basePath)) {
+            return List.of();
+        }
+        try (Stream<Path> dirs = Files.list(basePath)) {
+            return dirs
+                    .filter(Files::isDirectory)
+                    .filter(dir -> Files.exists(dir.resolve("allure-results")))
+                    .map(dir -> {
+                        try {
+                            return UUID.fromString(dir.getFileName().toString());
+                        } catch (IllegalArgumentException e) {
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            log.error("Failed to list available runs", e);
+            return List.of();
+        }
+    }
+
+    public Optional<String> generateCombinedAllureReport(List<UUID> runIds) {
+        List<UUID> effectiveRunIds = (runIds == null || runIds.isEmpty())
+                ? listAvailableRuns()
+                : runIds;
+
+        if (effectiveRunIds.isEmpty()) {
+            log.warn("No runs available for combined report");
+            return Optional.empty();
+        }
+
+        // Collect allure-results directories
+        List<Path> allureResultsDirs = effectiveRunIds.stream()
+                .map(id -> getResultsPath(id).resolve("allure-results"))
+                .filter(Files::exists)
+                .collect(Collectors.toList());
+
+        if (allureResultsDirs.isEmpty()) {
+            log.warn("No allure-results directories found for the specified runs");
+            return Optional.empty();
+        }
+
+        String allureCommand = isAllureAvailable();
+        if (allureCommand == null) {
+            log.warn("Allure CLI not found. Cannot generate combined report.");
+            return Optional.empty();
+        }
+
+        try {
+            Path combinedReportDir = getBaseResultsPath().resolve("combined").resolve("allure-report");
+            Files.createDirectories(combinedReportDir);
+
+            List<String> command = new ArrayList<>();
+            command.add(allureCommand);
+            command.add("generate");
+            for (Path dir : allureResultsDirs) {
+                command.add(dir.toString());
+            }
+            command.add("-o");
+            command.add(combinedReportDir.toString());
+            command.add("--clean");
+
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+            int exitCode = process.waitFor();
+
+            if (exitCode == 0) {
+                Path indexHtml = combinedReportDir.resolve("index.html");
+                if (Files.exists(indexHtml)) {
+                    String reportUrl = "/reports/combined/allure-report/index.html";
+                    log.info("Combined Allure report generated successfully from {} runs at URL: {}",
+                            allureResultsDirs.size(), reportUrl);
+                    return Optional.of(reportUrl);
+                } else {
+                    log.error("Allure command succeeded but index.html not found at: {}", indexHtml.toAbsolutePath());
+                    return Optional.empty();
+                }
+            } else {
+                log.error("Failed to generate combined Allure report, exit code: {}", exitCode);
+                return Optional.empty();
+            }
+        } catch (IOException e) {
+            log.error("Error generating combined Allure report", e);
+            return Optional.empty();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Interrupted while generating combined Allure report", e);
+            return Optional.empty();
+        }
+    }
+
+    private Path getBaseResultsPath() {
+        String envPath = System.getenv("TEST_RESULTS_PATH");
+        if (envPath != null && !envPath.isBlank()) {
+            return Path.of(envPath);
+        }
+        String sysProp = System.getProperty("test.results.path");
+        if (sysProp != null && !sysProp.isBlank()) {
+            return Path.of(sysProp);
+        }
+        return Path.of("test-results");
     }
 
     private Path getResultsPath(UUID runId) {

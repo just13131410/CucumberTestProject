@@ -11,7 +11,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -406,5 +411,73 @@ class TestExecutionServiceTest {
 
         assertNotNull(response);
         assertEquals("QUEUED", response.getStatus());
+    }
+
+    // --- listAvailableRuns tests ---
+
+    @Test
+    void listAvailableRuns_NoResultsDir_ReturnsEmptyList() {
+        // Default test-results dir doesn't exist in test environment
+        // Use a non-existent path
+        System.setProperty("test.results.path", "non-existent-dir-" + UUID.randomUUID());
+        try {
+            List<UUID> runs = testExecutionService.listAvailableRuns();
+            assertNotNull(runs);
+            assertTrue(runs.isEmpty());
+        } finally {
+            System.clearProperty("test.results.path");
+        }
+    }
+
+    @Test
+    void listAvailableRuns_WithValidRuns_ReturnsUUIDs(@TempDir Path tempDir) throws IOException {
+        UUID run1 = UUID.randomUUID();
+        UUID run2 = UUID.randomUUID();
+
+        // Create run directories with allure-results
+        Files.createDirectories(tempDir.resolve(run1.toString()).resolve("allure-results"));
+        Files.createDirectories(tempDir.resolve(run2.toString()).resolve("allure-results"));
+        // Create a directory without allure-results (should be excluded)
+        Files.createDirectories(tempDir.resolve(UUID.randomUUID().toString()));
+        // Create a non-UUID directory with allure-results (should be excluded)
+        Files.createDirectories(tempDir.resolve("not-a-uuid").resolve("allure-results"));
+
+        System.setProperty("test.results.path", tempDir.toString());
+        try {
+            List<UUID> runs = testExecutionService.listAvailableRuns();
+            assertEquals(2, runs.size());
+            assertTrue(runs.contains(run1));
+            assertTrue(runs.contains(run2));
+        } finally {
+            System.clearProperty("test.results.path");
+        }
+    }
+
+    // --- generateCombinedAllureReport tests ---
+
+    @Test
+    void generateCombinedAllureReport_NoRuns_ReturnsEmpty() {
+        System.setProperty("test.results.path", "non-existent-dir-" + UUID.randomUUID());
+        try {
+            Optional<String> result = testExecutionService.generateCombinedAllureReport(null);
+            assertFalse(result.isPresent());
+        } finally {
+            System.clearProperty("test.results.path");
+        }
+    }
+
+    @Test
+    void generateCombinedAllureReport_NoAllureResultsDirs_ReturnsEmpty(@TempDir Path tempDir) throws IOException {
+        UUID runId = UUID.randomUUID();
+        // Create run directory without allure-results subdirectory
+        Files.createDirectories(tempDir.resolve(runId.toString()));
+
+        System.setProperty("test.results.path", tempDir.toString());
+        try {
+            Optional<String> result = testExecutionService.generateCombinedAllureReport(List.of(runId));
+            assertFalse(result.isPresent());
+        } finally {
+            System.clearProperty("test.results.path");
+        }
     }
 }

@@ -323,7 +323,7 @@ class TestExecutionControllerTest {
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
-    // --- POST /api/v1/test/report/combined/generate ---
+    // --- POST /api/v1/test/combined-report/generate ---
 
     @Test
     void generateCombinedReport_WithRunIds_Returns200() throws Exception {
@@ -336,7 +336,7 @@ class TestExecutionControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/test/report/combined/generate")
+        mockMvc.perform(post("/api/v1/test/combined-report/generate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isOk())
@@ -349,7 +349,7 @@ class TestExecutionControllerTest {
         when(testExecutionService.generateCombinedAllureReport(null))
                 .thenReturn(Optional.of("/reports/combined/allure-report/index.html"));
 
-        mockMvc.perform(post("/api/v1/test/report/combined/generate"))
+        mockMvc.perform(post("/api/v1/test/combined-report/generate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reportUrl").value("/reports/combined/allure-report/index.html"));
     }
@@ -365,7 +365,7 @@ class TestExecutionControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/test/report/combined/generate")
+        mockMvc.perform(post("/api/v1/test/combined-report/generate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isNotFound());

@@ -270,7 +270,7 @@ public class TestExecutionController {
      * @param request Optionaler Request-Body mit Run-IDs
      * @return URL zum generierten kombinierten Report
      */
-    @PostMapping(value = "/report/combined/generate",
+    @PostMapping(value = "/combined-report/generate",
             produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Kombinierten Allure-Report generieren",
             description = "Generiert einen Allure-Report ueber mehrere Test-Runs. Ohne Body oder leere runIds = alle Runs.")

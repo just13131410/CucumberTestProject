@@ -253,7 +253,9 @@
           <threadCount>${parallel.threads}</threadCount>
           <perCoreThreadCount>true</perCoreThreadCount>
           <!-- Allure Integration -->
+          <!-- @{argLine} = late binding: allows JaCoCo prepare-agent to prepend its -javaagent -->
           <argLine>
+            @{argLine}
             -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"
           </argLine>
           <systemPropertyVariables>
@@ -285,7 +287,9 @@
           <threadCount>${parallel.threads}</threadCount>
           <perCoreThreadCount>true</perCoreThreadCount>
           <!-- Allure Integration -->
+          <!-- @{argLine} = late binding: allows JaCoCo prepare-agent to prepend its -javaagent -->
           <argLine>
+            @{argLine}
             -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"
           </argLine>
           <systemPropertyVariables>
@@ -392,6 +396,22 @@
               <goal>check</goal>
             </goals>
             <configuration>
+              <excludes>
+                <!-- Playwright Page Objects: require a real browser (integration-test scope only) -->
+                <exclude>org/example/pages/**</exclude>
+                <!-- Cucumber Step Definitions: require Cucumber lifecycle (integration-test scope only) -->
+                <exclude>org/example/steps/**</exclude>
+                <!-- Cucumber Hooks: require Cucumber lifecycle (integration-test scope only) -->
+                <exclude>org/example/hooks/**</exclude>
+                <!-- JUnit 5 Platform Suite runner: only executed during failsafe -->
+                <exclude>org/example/cucumber/runner/**</exclude>
+                <!-- Spring Boot entry point: main() not invoked in unit tests -->
+                <exclude>org/example/App*</exclude>
+                <!-- CucumberRunnerService: invokes Cucumber CLI, requires full runtime -->
+                <exclude>org/example/CucumberRunnerService*</exclude>
+                <!-- TestExecutionService: Cucumber-invocation paths only coverable via integration tests -->
+                <exclude>org/example/cucumber/service/**</exclude>
+              </excludes>
               <rules>
                 <rule>
                   <element>PACKAGE</element>

@@ -305,6 +305,22 @@ curl -X POST http://localhost:8080/api/v1/test/report/550e8400-e29b-41d4-a716-44
 - **Voraussetzung:** Allure CLI muss auf dem Server installiert sein
 - Die Report-Generierung dauert je nach Testumfang 5-30 Sekunden
 
+**Enthaltene Anhaenge im Allure-Report:**
+
+| Anhangstyp                   | Beschreibung                                                                 |
+|------------------------------|------------------------------------------------------------------------------|
+| Screenshot (PNG)             | Wird nach jedem UI-Schritt (`@When`) aufgenommen; am Szenario-Ende mit Prefix `END_` (bestanden) bzw. `FAILED_` (fehlgeschlagen) |
+| Barrierefreiheitsbericht (HTML) | Axe-Accessibility-Scan-Ergebnis im Teardown-Schritt jedes UI-Szenarios    |
+| HTTP Request / Response      | Bei API-Tests (`@API-Test`) wird jede HTTP-Anfrage mit Request und Response eingebettet |
+
+**Axe-Accessibility-Report direkt abrufen:**
+
+Der Axe-Report ist auch ohne Allure-Generierung direkt aufrufbar:
+```
+GET /reports/{runId}/axe-result/index.html
+```
+Pro Seiten-URL wird innerhalb eines Runs genau ein Scan durchgefuehrt (Deduplizierung).
+
 **Fehler:**
 
 | Code | Bedeutung                                      |
@@ -466,7 +482,7 @@ Generiert einen uebergreifenden Allure-Report ueber mehrere Test-Runs. Der kombi
 
 **Request:**
 ```
-POST /api/v1/test/report/combined/generate
+POST /api/v1/test/combined-report/generate
 Content-Type: application/json
 ```
 
@@ -478,12 +494,12 @@ Content-Type: application/json
 
 **Beispiel - Alle Runs kombinieren:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/test/report/combined/generate
+curl -X POST http://localhost:8080/api/v1/test/combined-report/generate
 ```
 
 **Beispiel - Bestimmte Runs kombinieren:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
+curl -X POST http://localhost:8080/api/v1/test/combined-report/generate \
   -H "Content-Type: application/json" \
   -d '{
     "runIds": [
@@ -507,6 +523,8 @@ curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
 - Der Report ist sofort unter der zurueckgegebenen URL im Browser aufrufbar
 - Bei erneuter Generierung wird der vorherige kombinierte Report ueberschrieben
 - Nuetzlich fuer Sprint-Reports oder teamuebergreifende Auswertungen
+- Im Report werden die einzelnen Runs als Suites gruppiert, z.B. `Run a76c4874 @Backend, @smoke` - so ist sofort erkennbar, welche Tags bei welchem Lauf verwendet wurden
+- Jeder Testfall erscheint pro Run einzeln (keine Deduplizierung), sodass alle Ausfuehrungen sichtbar sind
 
 **Fehler:**
 
@@ -579,10 +597,10 @@ curl -s http://localhost:8080/api/v1/test/runs
 # --> ["550e8400-...", "660f9511-..."]
 
 # 2. Kombinierten Report generieren (alle Runs)
-curl -s -X POST http://localhost:8080/api/v1/test/report/combined/generate
+curl -s -X POST http://localhost:8080/api/v1/test/combined-report/generate
 
 # Oder: Nur bestimmte Runs kombinieren
-curl -s -X POST http://localhost:8080/api/v1/test/report/combined/generate \
+curl -s -X POST http://localhost:8080/api/v1/test/combined-report/generate \
   -H "Content-Type: application/json" \
   -d '{"runIds": ["550e8400-...", "660f9511-..."]}'
 
@@ -646,14 +664,16 @@ Tags koennen kombiniert werden:
 
 ## Fehlerbehebung
 
-| Problem                           | Loesung                                                        |
-|-----------------------------------|----------------------------------------------------------------|
-| `400 Bad Request`                 | Request-Body pruefen: `environment` und `tags` sind Pflicht    |
-| `404 Not Found`                   | Run-ID pruefen - ist sie korrekt?                              |
-| `429 Too Many Requests`           | Warten bis laufende Tests abgeschlossen sind                   |
-| Status bleibt auf `QUEUED`        | Alle 5 Slots belegt - mit `GET /active` aktive Tests pruefen   |
-| Report leer oder nicht vorhanden  | Test muss erst abgeschlossen sein (Status: COMPLETED/FAILED)   |
-| UI-Tests schlagen fehl            | Browser pruefen (`chromium` ist Standard im Container)         |
+| Problem                                    | Loesung                                                        |
+|--------------------------------------------|----------------------------------------------------------------|
+| `400 Bad Request`                          | Request-Body pruefen: `environment` und `tags` sind Pflicht    |
+| `404 Not Found`                            | Run-ID pruefen - ist sie korrekt?                              |
+| `429 Too Many Requests`                    | Warten bis laufende Tests abgeschlossen sind                   |
+| Status bleibt auf `QUEUED`                 | Alle 5 Slots belegt - mit `GET /active` aktive Tests pruefen   |
+| Report leer oder nicht vorhanden           | Test muss erst abgeschlossen sein (Status: COMPLETED/FAILED)   |
+| UI-Tests schlagen fehl                     | Browser pruefen (`chromium` ist Standard im Container)         |
+| Keine Screenshots im Allure-Report         | Screenshots werden nur bei UI-Tests (`@End2End`, `@smoke`) erstellt, nicht bei `@API-Test` |
+| Kein Barrierefreiheitsbericht im Report    | Axe-Scan wird nur bei UI-Tests ausgefuehrt; Report unter `/reports/{runId}/axe-result/index.html` pruefen |
 
 **Monitoring-Endpoints:**
 

@@ -1,6 +1,6 @@
 Feature: Buy Product
 
-  @End2End @T-3512 @SmokeTest
+  @Frontend @T-3512 @SmokeTest
   Scenario Outline: Buy a SwagLabs product successfully
     Given User launched SwagLabs application
     When User logged in the app using username "<UserName>" and password "<Password>"

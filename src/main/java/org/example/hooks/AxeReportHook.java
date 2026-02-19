@@ -22,11 +22,22 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 public class AxeReportHook {
     private static final ObjectMapper mapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
+
+    /**
+     * Tracks already-scanned URLs per output directory (= per run).
+     * Key: absolute path of the axe result directory (unique per run).
+     * Value: set of page URLs already scanned in that run.
+     * Prevents duplicate axe scans when multiple scenarios visit the same page.
+     */
+    private static final ConcurrentHashMap<String, Set<String>> scannedUrlsByRun =
+            new ConcurrentHashMap<>();
 
     /**
      * Resolves the axe report output directory.
@@ -42,11 +53,21 @@ public class AxeReportHook {
     /**
      * Fuehrt den Axe Scan aus und speichert das Ergebnis sofort als JSON + HTML.
      * Aktualisiert danach die Uebersichtsseite (index.html) im Report-Verzeichnis.
+     * Innerhalb eines Runs wird jede URL nur einmal gescannt – Duplikate werden uebersprungen.
      */
     public static void runAndSave(Page page, String fileName) {
+        Path reportDir = resolveReportPath();
+        String runKey  = reportDir.toAbsolutePath().toString();
+        String pageUrl = page.url();
+
+        Set<String> scanned = scannedUrlsByRun.computeIfAbsent(runKey, k -> ConcurrentHashMap.newKeySet());
+        if (!scanned.add(pageUrl)) {
+            System.out.println("Axe-Scan uebersprungen (URL bereits gescannt in diesem Run): " + pageUrl);
+            return;
+        }
+
         try {
             AxeResults results = new AxeBuilder(page).analyze();
-            Path reportDir = resolveReportPath();
 
             if (Files.notExists(reportDir)) {
                 Files.createDirectories(reportDir);

@@ -480,4 +480,66 @@ class TestExecutionServiceTest {
             System.clearProperty("test.results.path");
         }
     }
+
+    // --- readTagsFromExecutorJson tests (private method via reflection) ---
+
+    private String readTagsFromExecutorJson(Path dir) throws Exception {
+        Method method = TestExecutionService.class.getDeclaredMethod("readTagsFromExecutorJson", Path.class);
+        method.setAccessible(true);
+        return (String) method.invoke(testExecutionService, dir);
+    }
+
+    @Test
+    void readTagsFromExecutorJson_WithTags_ReturnsTags(@TempDir Path tempDir) throws Exception {
+        String executorJson = """
+                {
+                  "name": "Cucumber Test Service",
+                  "type": "api",
+                  "buildName": "Run 550e8400",
+                  "buildOrder": 1234567890,
+                  "reportName": "Run 550e8400 [dev] @Backend, @smoke",
+                  "reportUrl": "/reports/550e8400/allure-report/index.html"
+                }""";
+        Files.writeString(tempDir.resolve("executor.json"), executorJson);
+
+        String tags = readTagsFromExecutorJson(tempDir);
+        assertEquals("@Backend, @smoke", tags);
+    }
+
+    @Test
+    void readTagsFromExecutorJson_WithoutTags_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
+        String executorJson = """
+                {
+                  "name": "Cucumber Test Service",
+                  "type": "api",
+                  "buildName": "Run 550e8400",
+                  "buildOrder": 1234567890,
+                  "reportName": "Run 550e8400 [dev] ",
+                  "reportUrl": "/reports/550e8400/allure-report/index.html"
+                }""";
+        Files.writeString(tempDir.resolve("executor.json"), executorJson);
+
+        String tags = readTagsFromExecutorJson(tempDir);
+        assertEquals("", tags);
+    }
+
+    @Test
+    void readTagsFromExecutorJson_NoExecutorFile_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
+        String tags = readTagsFromExecutorJson(tempDir);
+        assertEquals("", tags);
+    }
+
+    @Test
+    void readTagsFromExecutorJson_NoReportNameField_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
+        String executorJson = """
+                {
+                  "name": "Cucumber Test Service",
+                  "type": "api",
+                  "buildName": "Run 550e8400"
+                }""";
+        Files.writeString(tempDir.resolve("executor.json"), executorJson);
+
+        String tags = readTagsFromExecutorJson(tempDir);
+        assertEquals("", tags);
+    }
 }

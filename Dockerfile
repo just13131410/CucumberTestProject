@@ -23,7 +23,7 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.3
 
 USER root
 
-# Install JRE 21 and Chromium system dependencies
+# Install JRE 21, Chromium system dependencies, and tools for Allure CLI
 RUN microdnf install -y \
     java-21-openjdk-headless \
     # Chromium dependencies
@@ -40,9 +40,23 @@ RUN microdnf install -y \
     alsa-lib \
     gtk3 \
     wget \
+    tar \
     fontconfig \
     freetype \
     && microdnf clean all
+
+# Install Allure CLI (version must match allure.version in pom.xml)
+ARG ALLURE_VERSION=2.32.0
+RUN wget -q "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz" \
+    -O /tmp/allure.tgz \
+    && tar -xzf /tmp/allure.tgz -C /opt \
+    && mv /opt/allure-${ALLURE_VERSION} /opt/allure \
+    && rm /tmp/allure.tgz \
+    && chown -R 1001:0 /opt/allure \
+    && chmod -R g=u /opt/allure
+
+ENV ALLURE_HOME=/opt/allure
+ENV PATH="$PATH:/opt/allure/bin"
 
 WORKDIR /app
 

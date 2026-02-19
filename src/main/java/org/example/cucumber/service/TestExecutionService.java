@@ -120,6 +120,9 @@ public class TestExecutionService {
                 updateStatus(runId, "FAILED", "Tests finished with exit code: " + result.exitCode());
             }
 
+            // Write executor.json for Allure (enables executor widget and trends in combined reports)
+            writeExecutorJson(runId, request);
+
             log.info("Test execution finished: runId={}, exitCode={}", runId, result.exitCode());
 
         } catch (Exception e) {
@@ -179,19 +182,22 @@ public class TestExecutionService {
             Files.createDirectories(allureReportDir);
 
             // Check if Allure CLI is available
-            String allureCommand = isAllureAvailable();
+            String[] allureCommand = isAllureAvailable();
             if (allureCommand == null) {
                 log.warn("Allure CLI not found. Please install Allure CLI or add it to the Docker image. Skipping report generation for runId: {}", runId);
                 return Optional.empty();
             }
 
+            // Copy history from previous report (enables trends)
+            copyHistory(allureReportDir, allureResultsDir);
+
             // Generate Allure report using command line
-            ProcessBuilder pb = new ProcessBuilder(
-                allureCommand, "generate",
+            List<String> command = new ArrayList<>(List.of(allureCommand));
+            command.addAll(List.of("generate",
                 allureResultsDir.toString(),
                 "-o", allureReportDir.toString(),
-                "--clean"
-            );
+                "--clean"));
+            ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
 
             Process process = pb.start();
@@ -224,20 +230,60 @@ public class TestExecutionService {
         }
     }
 
-    private String isAllureAvailable() {
-        String[] possibleCommands = {"allure", "allure.bat", "allure.cmd"};
-        for (String cmd : possibleCommands) {
+    private String[] isAllureAvailable() {
+        // Try direct commands first (works on Linux, macOS, and Windows with allure in PATH)
+        String[] directCommands = {"allure", "allure.bat", "allure.cmd"};
+        for (String cmd : directCommands) {
             try {
                 ProcessBuilder pb = new ProcessBuilder(cmd, "--version");
                 pb.redirectErrorStream(true);
                 Process process = pb.start();
                 int exitCode = process.waitFor();
                 if (exitCode == 0) {
-                    return cmd;
+                    return new String[]{cmd};
                 }
             } catch (IOException | InterruptedException e) {
                 // Command not found or failed, try next
             }
+        }
+
+        // Fallback: find Allure installation and run via java -cp (works on all platforms)
+        Path allureHome = findAllureHome();
+        if (allureHome != null) {
+            Path libDir = allureHome.resolve("lib");
+            String classpath = libDir + java.io.File.separator + "*"
+                    + java.io.File.pathSeparator + libDir.resolve("config");
+            try {
+                ProcessBuilder pb = new ProcessBuilder("java", "-cp", classpath,
+                        "io.qameta.allure.CommandLine", "--version");
+                pb.redirectErrorStream(true);
+                Process process = pb.start();
+                int exitCode = process.waitFor();
+                if (exitCode == 0) {
+                    log.info("Found Allure CLI via java -cp at: {}", allureHome);
+                    return new String[]{"java", "-cp", classpath, "io.qameta.allure.CommandLine"};
+                }
+            } catch (IOException | InterruptedException e) {
+                // java not available, skip
+            }
+        }
+
+        return null;
+    }
+
+    private Path findAllureHome() {
+        // Check Scoop installation (Windows)
+        String userHome = System.getProperty("user.home");
+        if (userHome != null) {
+            Path scoopAllure = Path.of(userHome, "scoop", "apps", "allure", "current");
+            if (Files.exists(scoopAllure.resolve("lib"))) {
+                return scoopAllure;
+            }
+        }
+        // Check ALLURE_HOME environment variable
+        String allureHome = System.getenv("ALLURE_HOME");
+        if (allureHome != null && Files.exists(Path.of(allureHome, "lib"))) {
+            return Path.of(allureHome);
         }
         return null;
     }
@@ -342,32 +388,44 @@ public class TestExecutionService {
             return Optional.empty();
         }
 
-        // Collect allure-results directories
-        List<Path> allureResultsDirs = effectiveRunIds.stream()
-                .map(id -> getResultsPath(id).resolve("allure-results"))
-                .filter(Files::exists)
+        // Filter to runs that actually have allure-results
+        List<UUID> validRunIds = effectiveRunIds.stream()
+                .filter(id -> Files.exists(getResultsPath(id).resolve("allure-results")))
                 .collect(Collectors.toList());
 
-        if (allureResultsDirs.isEmpty()) {
+        if (validRunIds.isEmpty()) {
             log.warn("No allure-results directories found for the specified runs");
             return Optional.empty();
         }
 
-        String allureCommand = isAllureAvailable();
+        String[] allureCommand = isAllureAvailable();
         if (allureCommand == null) {
             log.warn("Allure CLI not found. Cannot generate combined report.");
             return Optional.empty();
         }
 
+        Path tempDir = null;
         try {
             Path combinedReportDir = getBaseResultsPath().resolve("combined").resolve("allure-report");
             Files.createDirectories(combinedReportDir);
 
-            List<String> command = new ArrayList<>();
-            command.add(allureCommand);
+            // Create temp directory with enriched copies of all allure-results
+            tempDir = Files.createTempDirectory("allure-combined-");
+            for (int i = 0; i < validRunIds.size(); i++) {
+                UUID id = validRunIds.get(i);
+                Path sourceDir = getResultsPath(id).resolve("allure-results");
+                Path targetDir = tempDir.resolve(id.toString());
+                copyAndEnrichResults(sourceDir, targetDir, id, i + 1);
+            }
+
+            // Copy history from previous combined report (enables trends)
+            copyHistory(combinedReportDir, tempDir.resolve(validRunIds.getFirst().toString()));
+
+            // Build allure generate command with enriched temp dirs
+            List<String> command = new ArrayList<>(List.of(allureCommand));
             command.add("generate");
-            for (Path dir : allureResultsDirs) {
-                command.add(dir.toString());
+            for (UUID id : validRunIds) {
+                command.add(tempDir.resolve(id.toString()).toString());
             }
             command.add("-o");
             command.add(combinedReportDir.toString());
@@ -384,7 +442,7 @@ public class TestExecutionService {
                 if (Files.exists(indexHtml)) {
                     String reportUrl = "/reports/combined/allure-report/index.html";
                     log.info("Combined Allure report generated successfully from {} runs at URL: {}",
-                            allureResultsDirs.size(), reportUrl);
+                            validRunIds.size(), reportUrl);
                     return Optional.of(reportUrl);
                 } else {
                     log.error("Allure command succeeded but index.html not found at: {}", indexHtml.toAbsolutePath());
@@ -401,6 +459,15 @@ public class TestExecutionService {
             Thread.currentThread().interrupt();
             log.error("Interrupted while generating combined Allure report", e);
             return Optional.empty();
+        } finally {
+            // Clean up temp directory
+            if (tempDir != null) {
+                try {
+                    deleteDirectory(tempDir);
+                } catch (IOException e) {
+                    log.warn("Failed to clean up temp directory: {}", tempDir, e);
+                }
+            }
         }
     }
 
@@ -434,6 +501,135 @@ public class TestExecutionService {
                     .forEach(path -> {
                         try { Files.delete(path); } catch (IOException ignored) {}
                     });
+        }
+    }
+
+    private void copyAndEnrichResults(Path sourceDir, Path targetDir, UUID runId, int buildOrder) throws IOException {
+        Files.createDirectories(targetDir);
+        String runLabel = runId.toString().substring(0, 8);
+
+        // Read tags from existing executor.json (written during test execution)
+        String runTags = readTagsFromExecutorJson(sourceDir);
+        String suiteLabel = runTags.isEmpty() ? "Run " + runLabel : "Run " + runLabel + " " + runTags;
+
+        try (var files = Files.list(sourceDir)) {
+            files.forEach(source -> {
+                try {
+                    Path target = targetDir.resolve(source.getFileName());
+                    String fileName = source.getFileName().toString();
+
+                    if (fileName.endsWith("-result.json")) {
+                        // Enrich test result: add run label, make historyId unique per run
+                        String content = Files.readString(source);
+
+                        // Add parentSuite label with runId + tags for grouping/filtering
+                        String runLabelJson = String.format(
+                                "{\"name\":\"parentSuite\",\"value\":\"%s\"}", suiteLabel);
+                        String tagJson = String.format(
+                                "{\"name\":\"tag\",\"value\":\"run-%s\"}", runLabel);
+
+                        // Insert labels into the labels array
+                        content = content.replaceFirst(
+                                "\"labels\"\\s*:\\s*\\[",
+                                "\"labels\":[" + runLabelJson + "," + tagJson + ",");
+
+                        // Make historyId unique per run so each execution shows as separate entry
+                        content = content.replaceAll(
+                                "\"historyId\"\\s*:\\s*\"([^\"]+)\"",
+                                "\"historyId\":\"$1-" + runId + "\"");
+
+                        Files.writeString(target, content);
+                    } else {
+                        // Copy other files as-is (attachments, etc.)
+                        Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (IOException e) {
+                    log.warn("Failed to copy/enrich file: {}", source, e);
+                }
+            });
+        }
+
+        // Write executor.json for this run
+        String executorJson = String.format("""
+                {
+                  "name": "Cucumber Test Service",
+                  "type": "api",
+                  "buildName": "%s",
+                  "buildOrder": %d,
+                  "reportUrl": "/reports/%s/allure-report/index.html"
+                }""", suiteLabel, buildOrder, runId);
+        Files.writeString(targetDir.resolve("executor.json"), executorJson);
+    }
+
+    private String readTagsFromExecutorJson(Path allureResultsDir) {
+        Path executorFile = allureResultsDir.resolve("executor.json");
+        if (!Files.exists(executorFile)) {
+            return "";
+        }
+        try {
+            String content = Files.readString(executorFile);
+            // reportName format: "Run <id> [<env>] <tags>"
+            // Extract tags from reportName field
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("\"reportName\"\\s*:\\s*\"[^\\[]*\\[[^\\]]*\\]\\s*(.*)\"")
+                    .matcher(content);
+            if (matcher.find()) {
+                return matcher.group(1).trim();
+            }
+        } catch (IOException e) {
+            log.warn("Failed to read executor.json from {}", allureResultsDir, e);
+        }
+        return "";
+    }
+
+    private void writeExecutorJson(UUID runId, TestExecutionRequest request) {
+        try {
+            Path allureResultsDir = getResultsPath(runId).resolve("allure-results");
+            if (!Files.exists(allureResultsDir)) return;
+
+            String buildName = "Run " + runId.toString().substring(0, 8);
+            String env = request.getEnvironment() != null ? request.getEnvironment() : "unknown";
+            String tags = request.getTags() != null ? String.join(", ", request.getTags()) : "";
+
+            String executorJson = String.format("""
+                    {
+                      "name": "Cucumber Test Service",
+                      "type": "api",
+                      "buildName": "%s",
+                      "buildOrder": %d,
+                      "reportName": "%s [%s] %s",
+                      "reportUrl": "/reports/%s/allure-report/index.html"
+                    }""",
+                    buildName,
+                    System.currentTimeMillis(),
+                    buildName, env, tags,
+                    runId);
+
+            Files.writeString(allureResultsDir.resolve("executor.json"), executorJson);
+        } catch (IOException e) {
+            log.warn("Failed to write executor.json for runId={}", runId, e);
+        }
+    }
+
+    private void copyHistory(Path sourceReportDir, Path targetResultsDir) {
+        Path historySource = sourceReportDir.resolve("history");
+        if (!Files.exists(historySource)) return;
+
+        Path historyTarget = targetResultsDir.resolve("history");
+        try {
+            Files.createDirectories(historyTarget);
+            try (var files = Files.list(historySource)) {
+                files.forEach(source -> {
+                    try {
+                        Files.copy(source, historyTarget.resolve(source.getFileName()),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    } catch (IOException e) {
+                        log.warn("Failed to copy history file: {}", source, e);
+                    }
+                });
+            }
+        } catch (IOException e) {
+            log.warn("Failed to copy history directory", e);
         }
     }
 

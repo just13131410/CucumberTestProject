@@ -4,16 +4,10 @@ package org.example.steps;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.When;
 import io.cucumber.java.en.Then;
-import io.restassured.response.Response;
-import io.restassured.filter.log.RequestLoggingFilter;
-import io.restassured.filter.log.ResponseLoggingFilter;
 import io.qameta.allure.Allure;
+import io.qameta.allure.restassured.AllureRestAssured;
+import io.restassured.response.Response;
 import org.example.utils.ConfigReader;
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -26,44 +20,19 @@ public class ApiSteps {
     @Given("API Basis-URL ist gesetzt")
     public void setBaseUrl() {
         this.baseUrl = ConfigReader.get("apiURL", "default-token");
-        // ... browser navigation logic ...
         Allure.step("Base URl gesetzt auf: " + this.baseUrl);
     }
 
     @When("ich GET an {string} ausführe")
     public void performGet(String path) {
-        ByteArrayOutputStream reqBaos = new ByteArrayOutputStream();
-        ByteArrayOutputStream resBaos = new ByteArrayOutputStream();
-
-        try (PrintStream reqPrint = new PrintStream(reqBaos, true, StandardCharsets.UTF_8);
-             PrintStream resPrint = new PrintStream(resBaos, true, StandardCharsets.UTF_8)) {
-
-            response = given()
-                    .baseUri(baseUrl)
-                    .filter(new RequestLoggingFilter(reqPrint))
-                    .filter(new ResponseLoggingFilter(resPrint))
-                    .when()
-                    .get(path)
-                    .then()
-                    .extract()
-                    .response();
-
-            reqPrint.flush();
-            resPrint.flush();
-
-            if (response != null) {
-                Allure.addAttachment("HTTP Request", "text/plain",
-                        new ByteArrayInputStream(reqBaos.toByteArray()), ".txt");
-                Allure.addAttachment("HTTP Response", "text/plain",
-                        new ByteArrayInputStream(resBaos.toByteArray()), ".txt");
-
-                byte[] bodyBytes = response.getBody() != null ? response.getBody().asByteArray() : null;
-                if (bodyBytes != null && bodyBytes.length > 0) {
-                    Allure.addAttachment("Response Body", "application/json",
-                            new ByteArrayInputStream(bodyBytes), ".json");
-                }
-            }
-        }
+        response = given()
+                .filter(new AllureRestAssured())
+                .baseUri(baseUrl)
+                .when()
+                .get(path)
+                .then()
+                .extract()
+                .response();
     }
 
     @Then("ist der Statuscode {int}")

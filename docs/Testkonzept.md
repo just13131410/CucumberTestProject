@@ -18,7 +18,7 @@
 8. [Testdatenmanagement](#8-testdatenmanagement)
 9. [Testreporting](#9-testreporting)
 10. [Testfallermittlung](#10-testfallermittlung)
-11. [Best Practices fuer API-Tests](#11-best-practices-fuer-api-tests)
+11. [Best Practices für API-Tests](#11-best-practices-für-api-tests)
 12. [CI/CD-Pipeline-Architektur](#12-cicd-pipeline-architektur)
 13. [Fehlermanagement](#13-fehlermanagement)
 
@@ -33,13 +33,13 @@ Die zu testenden Systeme (System Under Test, SUT) sind:
 | Testobjekt               | Beschreibung                                                          | Typ        |
 |--------------------------|-----------------------------------------------------------------------|------------|
 | **Backend-Verbund**      | Mehrere zusammenwirkende Backend-Services (Microservice-Architektur)  | Backend    |
-| **Frontend Logviewer**   | Webbasierte Oberflaeche zur Anzeige und Analyse von Log-Daten        | Frontend   |
+| **Frontend Logviewer**   | Webbasierte Oberfläche zur Anzeige und Analyse von Log-Daten        | Frontend   |
 
 ### 1.2 Testinfrastruktur – Cucumber Test Service
 
-Die automatisierten Tests werden nicht direkt in den Projekten der Testobjekte ausgefuehrt, sondern zentral ueber den **Cucumber Test Service** gesteuert. Dieser ist ein eigenstaendiger Spring-Boot-4-Microservice (Java 21), der als Testinfrastruktur in OpenShift betrieben wird.
+Die automatisierten Tests werden nicht direkt in den Projekten der Testobjekte ausgeführt, sondern zentral über den **Cucumber Test Service** gesteuert. Dieser ist ein eigenständiger Spring-Boot-4-Microservice (Java 21), der als Testinfrastruktur in OpenShift betrieben wird.
 
-**Funktionsweise:** Die CI/CD-Pipelines der Testobjekte (Backend-Verbund, Logviewer) rufen nach dem Deployment den Cucumber Test Service ueber seine REST-API auf. Der Service fuehrt die im Repository hinterlegten Cucumber-Tests (`src/main/resources/features`) gegen die deployten Testobjekte aus und stellt die Ergebnisse bereit.
+**Funktionsweise:** Die CI/CD-Pipelines der Testobjekte (Backend-Verbund, Logviewer) rufen nach dem Deployment den Cucumber Test Service über seine REST-API auf. Der Service führt die im Repository hinterlegten Cucumber-Tests (`src/main/resources/features`) gegen die deployten Testobjekte aus und stellt die Ergebnisse bereit.
 
 ### 1.3 Gesamtarchitektur
 
@@ -164,10 +164,10 @@ Status: COMPLETED / FAILED
 |-------------------------------|------------------------------|----------|------------------------------|
 | Testinfrastruktur-Framework   | Spring Boot                  | 3.2.2    | Cucumber Test Service        |
 | BDD-Framework                 | Cucumber                     | 7.15.0   | Feature-Files und Glue-Code  |
-| Test-Runner                   | JUnit 5 Platform Suite       | 5.10.1   | Testausfuehrung              |
+| Test-Runner                   | JUnit 5 Platform Suite       | 5.10.1   | Testausführung              |
 | UI-Automatisierung            | Playwright                   | 1.41.0   | Tests gegen Logviewer        |
 | API-Automatisierung           | REST Assured                 | 5.4.0    | Tests gegen Backend-Verbund  |
-| Barrierefreiheit              | axe-core/playwright          | –        | WCAG-Pruefung des Logviewers |
+| Barrierefreiheit              | axe-core/playwright          | –        | WCAG-Prüfung des Logviewers |
 | Reporting                     | Allure                       | 2.25.0   | Testergebnis-Reports         |
 | Container-Basis               | Red Hat UBI9                 | 9.3      | Container-Image              |
 | Orchestrierung                | OpenShift / Kubernetes       | –        | Deployment aller Systeme     |
@@ -181,27 +181,27 @@ Status: COMPLETED / FAILED
 │  Schicht 1 – Unit-Tests (pro Testobjekt)                               │
 │  Im jeweiligen Projekt des Testobjekts (Backend-Verbund, Logviewer)    │
 │  JUnit / Jest / projektspezifisch                                      │
-│  Ziel: Einzelne Klassen/Komponenten isoliert pruefen                   │
-│  Ausfuehrung: Bei jedem Build, lokal + CI/CD                           │
+│  Ziel: Einzelne Klassen/Komponenten isoliert prüfen                   │
+│  Ausführung: Bei jedem Build, lokal + CI/CD                           │
 ├────────────────────────────────────────────────────────────────────────┤
 │  Schicht 2 – Automatisierte Integrationstests                          │
 │  Via Cucumber Test Service (REST-API-Aufruf aus CI/CD-Pipeline)        │
 │  Cucumber + Playwright (Logviewer) / REST Assured (Backend-Verbund)    │
-│  Ziel: Zusammenspiel der Komponenten und Schnittstellen pruefen        │
-│  Ausfuehrung: CI/CD-Pipeline bei Push auf develop (Backend)            │
+│  Ziel: Zusammenspiel der Komponenten und Schnittstellen prüfen        │
+│  Ausführung: CI/CD-Pipeline bei Push auf develop (Backend)            │
 │               CI/CD-Pipeline bei Push auf Feature-/develop-Branch (FE) │
 ├────────────────────────────────────────────────────────────────────────┤
 │  Schicht 3 – Manuelle Tests                                            │
 │  Integrations- und Fehlerhandling-Tests                                │
-│  Gesamtintegrationstest (End-to-End ueber alle Systeme)                │
+│  Gesamtintegrationstest (End-to-End über alle Systeme)                │
 │  Ziel: Abdeckung von Szenarien, die nicht automatisierbar sind         │
-│  Ausfuehrung: Auf Testumgebung, vor Release                           │
+│  Ausführung: Auf Testumgebung, vor Release                           │
 ├────────────────────────────────────────────────────────────────────────┤
 │  Schicht 4 – Externe Tests (Abnahme)                                   │
 │  Last-/Performance-Test, Penetrationstest                              │
 │  Manueller Barrierefreiheitstest (sehende + blinde Nutzer)             │
-│  Ziel: Nichtfunktionale Qualitaet sicherstellen                       │
-│  Ausfuehrung: Auf Abnahmeumgebung, vor Produktivsetzung               │
+│  Ziel: Nichtfunktionale Qualität sicherstellen                       │
+│  Ausführung: Auf Abnahmeumgebung, vor Produktivsetzung               │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -209,38 +209,38 @@ Status: COMPLETED / FAILED
 
 ## 2. Testeingangskriterien
 
-Bevor eine Teststufe begonnen wird, muessen folgende Kriterien erfuellt sein:
+Bevor eine Teststufe begonnen wird, müssen folgende Kriterien erfüllt sein:
 
 ### 2.1 Unit-Tests (pro Testobjekt)
 - [ ] Code des Testobjekts kompiliert fehlerfrei
-- [ ] Alle benoetigten Abhaengigkeiten sind aufgeloest
-- [ ] Entwickler hat lokale Unit-Tests durchgefuehrt
+- [ ] Alle benötigten Abhängigkeiten sind aufgelöst
+- [ ] Entwickler hat lokale Unit-Tests durchgeführt
 
 ### 2.2 Automatisierte Integrationstests (via Cucumber Test Service)
 - [ ] Unit-Tests des Testobjekts sind zu 100 % bestanden
 - [ ] Testobjekt ist auf der Zielumgebung deployed und erreichbar
-- [ ] Cucumber Test Service ist verfuegbar und healthy (`/actuator/health`)
-- [ ] Feature-Files und Step-Definitions fuer das Testobjekt sind aktuell
+- [ ] Cucumber Test Service ist verfügbar und healthy (`/actuator/health`)
+- [ ] Feature-Files und Step-Definitions für das Testobjekt sind aktuell
 - [ ] Testdaten sind in definiertem Ausgangszustand
 - [ ] Ziel-URLs (Backend-Verbund / Logviewer) sind in der ConfigMap hinterlegt
 
 ### 2.3 Manuelle Tests (Integration + Fehlerhandling)
 - [ ] Automatisierte Integrationstests sind bestanden
 - [ ] Testumgebung mit aktueller Version aller Testobjekte deployt
-- [ ] Testfaelle sind im Testmanagement-Tool dokumentiert
-- [ ] Zugang zur Testumgebung fuer alle Tester vorhanden
+- [ ] Testfälle sind im Testmanagement-Tool dokumentiert
+- [ ] Zugang zur Testumgebung für alle Tester vorhanden
 
 ### 2.4 Gesamtintegrationstest
 - [ ] Alle Einzelkomponenten-Tests (Backend-Verbund + Logviewer) sind bestanden
 - [ ] Gesamtumgebung (alle Services des Backend-Verbunds + Logviewer) ist aufgebaut
-- [ ] End-to-End-Testfaelle sind abgestimmt und freigegeben
-- [ ] Schnittstellen zu Drittsystemen sind verfuegbar oder gemockt
+- [ ] End-to-End-Testfälle sind abgestimmt und freigegeben
+- [ ] Schnittstellen zu Drittsystemen sind verfügbar oder gemockt
 
 ### 2.5 Externe Tests (Abnahme)
 - [ ] Gesamtintegrationstest bestanden
 - [ ] Abnahmeumgebung ist produktionsnah konfiguriert
 - [ ] Vertrag/Leistungsschein mit externem Testteam liegt vor
-- [ ] Testinfrastruktur fuer L/P-Test bereitgestellt
+- [ ] Testinfrastruktur für L/P-Test bereitgestellt
 
 ---
 
@@ -255,23 +255,23 @@ Bevor eine Teststufe begonnen wird, muessen folgende Kriterien erfuellt sein:
 - [x] 100 % der Smoke-Tests bestanden
 - [x] >= 95 % der Regressionstests bestanden
 - [x] Alle Allure- und Cucumber-Reports generiert und archiviert
-- [x] Barrierefreiheits-Scans (Logviewer) zeigen keine kritischen Verstoesse
+- [x] Barrierefreiheits-Scans (Logviewer) zeigen keine kritischen Verstöße
 
 ### 3.3 Manuelle Tests
-- [x] Alle geplanten Testfaelle durchgefuehrt
-- [x] Keine offenen Fehler mit Prioritaet "Kritisch" oder "Hoch"
-- [x] Fehlerhandling-Szenarien dokumentiert und geprueft
+- [x] Alle geplanten Testfälle durchgeführt
+- [x] Keine offenen Fehler mit Priorität "Kritisch" oder "Hoch"
+- [x] Fehlerhandling-Szenarien dokumentiert und geprüft
 - [x] Testergebnisse im Testmanagement-Tool erfasst
 
 ### 3.4 Gesamtintegrationstest
 - [x] Alle End-to-End-Szenarien erfolgreich durchlaufen
 - [x] Backend-Verbund und Logviewer funktionieren im Zusammenspiel korrekt
-- [x] Keine Regressionen gegenueber letztem Release
+- [x] Keine Regressionen gegenüber letztem Release
 
 ### 3.5 Externe Tests (Abnahme)
 - [x] L/P-Test: Definierte Lastgrenzen werden eingehalten
 - [x] Pentest: Keine kritischen oder hohen Schwachstellen offen
-- [x] Barrierefreiheit: WCAG 2.1 Level AA Konformitaet (automatisiert + manuell)
+- [x] Barrierefreiheit: WCAG 2.1 Level AA Konformität (automatisiert + manuell)
 - [x] Abnahmebericht liegt vor und ist unterschrieben
 
 ---
@@ -301,7 +301,7 @@ Bevor eine Teststufe begonnen wird, muessen folgende Kriterien erfuellt sein:
 | L-04 | Echtzeit-Aktualisierung der Log-Daten         | Manuell                | Manuell     |
 | L-05 | Export-Funktionen                              | Integration + Manuell  | Gemischt    |
 | L-06 | Fehlerdarstellung und Fehlermeldungen          | Manuell                | Manuell     |
-| L-07 | Barrierefreiheitspruefung (axe-core, WCAG 2.1)| Integration            | Automatisch |
+| L-07 | Barrierefreiheitsprüfung (axe-core, WCAG 2.1)| Integration            | Automatisch |
 | L-08 | Gesamtintegration mit Backend-Verbund          | Gesamtintegrationstest | Manuell     |
 
 ### 4.3 Nichtfunktionale Eigenschaften (beide Testobjekte)
@@ -312,7 +312,7 @@ Bevor eine Teststufe begonnen wird, muessen folgende Kriterien erfuellt sein:
 | NF-02 | Performance / Lastverhalten        | Logviewer        | Extern (L/P)          | Manuell     |
 | NF-03 | Sicherheit / Penetrationstest      | Beide            | Extern (Pentest)      | Manuell     |
 | NF-04 | Barrierefreiheit (WCAG 2.1 AA)     | Logviewer        | Automatisch + Extern  | Gemischt    |
-| NF-05 | Container-Stabilitaet (OpenShift)  | Beide            | Integration           | Automatisch |
+| NF-05 | Container-Stabilität (OpenShift)  | Beide            | Integration           | Automatisch |
 | NF-06 | Health-/Readiness-Probes           | Beide            | Integration           | Automatisch |
 
 ---
@@ -324,25 +324,25 @@ Bevor eine Teststufe begonnen wird, muessen folgende Kriterien erfuellt sein:
 | Aufgabe                                          | Beschreibung                                                                     |
 |--------------------------------------------------|----------------------------------------------------------------------------------|
 | Unit-Tests im jeweiligen Projekt                 | Jede neue Klasse/Methode im Testobjekt wird mit Unit-Tests abgedeckt            |
-| Cucumber-Feature-Files erstellen                 | Szenarien in Gherkin fuer Backend-APIs und Logviewer-Workflows                   |
+| Cucumber-Feature-Files erstellen                 | Szenarien in Gherkin für Backend-APIs und Logviewer-Workflows                   |
 | Step-Definitions implementieren                  | Glue-Code im Cucumber Test Service (`org.example.steps`)                         |
-| Page Objects fuer Logviewer pflegen              | Playwright-basierte Page Objects im Cucumber Test Service (`org.example.pages`)  |
-| API-Steps fuer Backend-Verbund pflegen           | REST-Assured-Steps im Cucumber Test Service                                      |
-| Lokale Tests vor Push ausfuehren                 | Unit-Tests im Testobjekt muessen bestehen                                        |
-| Code-Reviews mit Testfokus                       | Reviewer prueft auch Testabdeckung und Testqualitaet                             |
-| Bug-Fixing nach Testfeedback                     | Priorisierte Behebung gemaess Fehlermanagement (Abschnitt 13)                   |
+| Page Objects für Logviewer pflegen              | Playwright-basierte Page Objects im Cucumber Test Service (`org.example.pages`)  |
+| API-Steps für Backend-Verbund pflegen           | REST-Assured-Steps im Cucumber Test Service                                      |
+| Lokale Tests vor Push ausführen                 | Unit-Tests im Testobjekt müssen bestehen                                        |
+| Code-Reviews mit Testfokus                       | Reviewer prüft auch Testabdeckung und Testqualität                             |
+| Bug-Fixing nach Testfeedback                     | Priorisierte Behebung gemäß Fehlermanagement (Abschnitt 13)                   |
 
 ### 5.2 Aufgaben des internen Testteams
 
 | Aufgabe                                          | Beschreibung                                                                     |
 |--------------------------------------------------|----------------------------------------------------------------------------------|
 | Testfallermittlung und -dokumentation            | Ableitung aus Fachkonzepten, User Stories, Architekturbildern                    |
-| Feature-Files reviewen und ergaenzen             | Qualitaetssicherung der automatisierten Testszenarien                            |
-| Manuelle Integrationstests                       | Fehlerhandling, Randfaelle, komplexe Workflows im Logviewer und Backend          |
-| Gesamtintegrationstest                           | End-to-End-Pruefung: Backend-Verbund + Logviewer im Zusammenspiel               |
+| Feature-Files reviewen und ergänzen             | Qualitätssicherung der automatisierten Testszenarien                            |
+| Manuelle Integrationstests                       | Fehlerhandling, Randfälle, komplexe Workflows im Logviewer und Backend          |
+| Gesamtintegrationstest                           | End-to-End-Prüfung: Backend-Verbund + Logviewer im Zusammenspiel               |
 | Testdatenmanagement                              | Bereitstellung und Pflege der Testdaten (siehe Abschnitt 8)                      |
 | Testreporting und -dokumentation                 | Auswertung der Allure-/Cucumber-/Axe-Reports, manuelle Protokollierung           |
-| Cucumber Test Service ueberwachen                | Sicherstellung der Verfuegbarkeit, Monitoring der Testlaufe                      |
+| Cucumber Test Service überwachen                | Sicherstellung der Verfügbarkeit, Monitoring der Testläufe                      |
 | Fehlermanagement                                 | Erfassung, Nachverfolgung und Verifikation von Fehlern                           |
 
 ### 5.3 Aufgaben der externen Testteams
@@ -351,11 +351,11 @@ Bevor eine Teststufe begonnen wird, muessen folgende Kriterien erfuellt sein:
 |------------------------------|-------------------------------------------------------------|---------------------|----------------------|---------------------------------|
 | **L/P-Testteam**             | Last- und Performancetest auf Abnahme                       | Backend-Verbund     | Vor Produktivsetzung | L/P-Testbericht mit Metriken    |
 | **L/P-Testteam**             | Last- und Performancetest auf Abnahme                       | Logviewer           | Vor Produktivsetzung | L/P-Testbericht mit Metriken    |
-| **Barrierefreiheits-Tester** | Manueller WCAG-2.1-Test fuer sehende User                  | Logviewer           | Vor Produktivsetzung | Pruefbericht mit Findings       |
-| **Barrierefreiheits-Tester** | Manueller Test fuer nicht-sehende User (Screenreader, Tastaturnavigation) | Logviewer | Vor Produktivsetzung | Pruefbericht mit Findings |
+| **Barrierefreiheits-Tester** | Manueller WCAG-2.1-Test für sehende User                  | Logviewer           | Vor Produktivsetzung | Prüfbericht mit Findings       |
+| **Barrierefreiheits-Tester** | Manueller Test für nicht-sehende User (Screenreader, Tastaturnavigation) | Logviewer | Vor Produktivsetzung | Prüfbericht mit Findings |
 | **Pentest-Dienstleister**    | Penetrationstest auf Abnahmeumgebung                        | Beide               | Vor Produktivsetzung | Pentest-Bericht (OWASP Top 10)  |
 
-**Hinweis zu externen Tests:** Jeder externe Test erfolgt auf der Abnahmeumgebung mit produktionsnaher Konfiguration. Die Ergebnisse werden als gesonderter Leistungsschein/Pruefbericht abgenommen. Kritische und hohe Findings muessen vor Go-Live behoben sein.
+**Hinweis zu externen Tests:** Jeder externe Test erfolgt auf der Abnahmeumgebung mit produktionsnaher Konfiguration. Die Ergebnisse werden als gesonderter Leistungsschein/Prüfbericht abgenommen. Kritische und hohe Findings müssen vor Go-Live behoben sein.
 
 ---
 
@@ -371,7 +371,7 @@ Bevor eine Teststufe begonnen wird, muessen folgende Kriterien erfuellt sein:
 │  Unit-Tests  │     │     Backend-Verbund   │     │  Manueller    │
 │  (lokal)     │     │  2. POST an Cucumber  │     │  Integrations-│
 │              │     │     Test Service      │     │  und Fehler-  │
-│              │     │  3. Ergebnisse pruefen│     │  handling-Test │
+│              │     │  3. Ergebnisse prüfen│     │  handling-Test │
 └──────────────┘     └──────────────────────┘     └──────────────┘
      Lokal              Automatisch                   Manuell
 ```
@@ -413,19 +413,19 @@ Push auf develop
 **Getestete Szenarien (Beispiele):**
 - REST-API-Endpunkte aller Backend-Services (Statuscodes, Response-Body, JSON-Schema)
 - Service-zu-Service-Kommunikation (Datenfluss zwischen Services A, B, C)
-- Authentifizierung und Autorisierung (gueltige/ungueltige Tokens)
-- Fehlerszenarien (ungueltige Requests, Timeout, nicht erreichbare Services)
+- Authentifizierung und Autorisierung (gültige/ungültige Tokens)
+- Fehlerszenarien (ungültige Requests, Timeout, nicht erreichbare Services)
 
 ### 6.4 Manueller Backend-Test (Testumgebung)
 
 | Testbereich              | Beispiele                                                                    |
 |--------------------------|------------------------------------------------------------------------------|
-| Fehlerhandling           | Ungueltige Eingaben, Netzwerkfehler, Service-Ausfaelle im Verbund           |
-| Grenzwertanalyse         | Maximale Payload-Groessen, viele gleichzeitige Requests, leere Eingaben      |
+| Fehlerhandling           | Ungültige Eingaben, Netzwerkfehler, Service-Ausfälle im Verbund           |
+| Grenzwertanalyse         | Maximale Payload-Größen, viele gleichzeitige Requests, leere Eingaben      |
 | Konfiguration            | Profilwechsel (dev/staging/prod), Umgebungsvariablen, Feature-Toggles        |
 | Recovery                 | Verhalten nach Container-Neustart, Datenbank-Failover                        |
-| Monitoring               | Health-Endpunkte, Metriken unter Last, Log-Erzeugung pruefen                |
-| Datenintegritaet         | Konsistenz der Daten ueber mehrere Services hinweg                           |
+| Monitoring               | Health-Endpunkte, Metriken unter Last, Log-Erzeugung prüfen                |
+| Datenintegrität         | Konsistenz der Daten über mehrere Services hinweg                           |
 
 ---
 
@@ -464,10 +464,10 @@ Push auf develop
 Bei jedem Push auf einen Feature-Branch des Logviewers wird automatisch:
 1. Ein Container-Image des Logviewers gebaut
 2. Ein eigener Namespace oder Deployment in OpenShift erstellt
-3. Eine temporaere Route zugewiesen
+3. Eine temporäre Route zugewiesen
 4. Der Cucumber Test Service aufgerufen mit der dynamischen URL als Ziel
-5. Smoke-Tests (`@SmokeTest`) gegen die dynamische Umgebung ausgefuehrt
-6. Bei Merge/Loesung des Branches wird die Umgebung abgebaut
+5. Smoke-Tests (`@SmokeTest`) gegen die dynamische Umgebung ausgeführt
+6. Bei Merge/Lösung des Branches wird die Umgebung abgebaut
 
 ```
 Feature-Branch Push (Logviewer)
@@ -495,7 +495,7 @@ Feature-Branch Push (Logviewer)
 - Log-Anzeige (Laden, Paginierung, Sortierung)
 - Suchfunktion und Filterlogik (nach Zeitraum, Severity, Service)
 - Datenexport (CSV, JSON)
-- Barrierefreiheitspruefung (axe-core) nach jedem relevanten Seitenaufruf
+- Barrierefreiheitsprüfung (axe-core) nach jedem relevanten Seitenaufruf
 
 **Browser-Matrix:**
 
@@ -509,36 +509,36 @@ Feature-Branch Push (Logviewer)
 
 | Testbereich              | Beispiele                                                                    |
 |--------------------------|------------------------------------------------------------------------------|
-| Visuelle Pruefung        | Layout, Responsiveness, Darstellung der Log-Tabelle bei vielen Eintraegen    |
-| Usability                | Benutzerfreundlichkeit der Filter, Navigationsfluesse, Fehlermeldungen       |
-| Echtzeit-Updates         | Log-Daten aktualisieren sich automatisch, WebSocket-Verbindungsabbrueche     |
-| Browser-Kompatibilitaet  | Chrome, Firefox, Safari, Edge (aktuelle Versionen)                           |
-| Mobile Darstellung       | Responsive Design auf gaengigen Viewports                                    |
+| Visuelle Prüfung        | Layout, Responsiveness, Darstellung der Log-Tabelle bei vielen Einträgen    |
+| Usability                | Benutzerfreundlichkeit der Filter, Navigationsflüsse, Fehlermeldungen       |
+| Echtzeit-Updates         | Log-Daten aktualisieren sich automatisch, WebSocket-Verbindungsabbrüche     |
+| Browser-Kompatibilität  | Chrome, Firefox, Safari, Edge (aktuelle Versionen)                           |
+| Mobile Darstellung       | Responsive Design auf gängigen Viewports                                    |
 | Fehlerszenarien          | Backend nicht erreichbar, leere Log-Daten, Timeout bei grossen Datenmengen   |
-| Barrierefreiheit (visuell)| Kontraste, Schriftgroessen, Farbblindheit-Simulation                         |
+| Barrierefreiheit (visuell)| Kontraste, Schriftgrößen, Farbblindheit-Simulation                         |
 
 ---
 
 ## 8. Testdatenmanagement
 
-### 8.1 Grundsaetze
+### 8.1 Grundsätze
 
 - Testdaten sind **versioniert** und Teil des Cucumber-Test-Service-Repositories (Feature-Files mit Beispieltabellen)
-- Jeder Testlauf arbeitet mit **definierten Ausgangsdaten** (keine Abhaengigkeit von Vorgaenger-Laeufen)
-- Testdaten fuer den Backend-Verbund werden ueber **Fixtures, Seeding-Skripte oder Mocks** bereitgestellt
-- Log-Daten fuer den Logviewer koennen ueber **Test-Log-Generatoren** im Backend erzeugt werden
-- Sensible Testdaten (Tokens, Zugangsdaten) werden ausschliesslich ueber **OpenShift Secrets / Vault** verwaltet
+- Jeder Testlauf arbeitet mit **definierten Ausgangsdaten** (keine Abhängigkeit von Vorgänger-Läufen)
+- Testdaten für den Backend-Verbund werden über **Fixtures, Seeding-Skripte oder Mocks** bereitgestellt
+- Log-Daten für den Logviewer können über **Test-Log-Generatoren** im Backend erzeugt werden
+- Sensible Testdaten (Tokens, Zugangsdaten) werden ausschließlich über **OpenShift Secrets / Vault** verwaltet
 
 ### 8.2 Testdatenquellen
 
 | Datenquelle                          | Verwendung                                      | Verwaltung                          |
 |--------------------------------------|--------------------------------------------------|--------------------------------------|
-| Cucumber-Examples (Feature-Files)    | Eingabedaten fuer UI- und API-Tests              | Git (Cucumber Test Service Repo)     |
+| Cucumber-Examples (Feature-Files)    | Eingabedaten für UI- und API-Tests              | Git (Cucumber Test Service Repo)     |
 | config.properties                    | URLs der Testobjekte, Pfade                      | Git (Umgebungsneutral)               |
 | OpenShift ConfigMap                  | Umgebungsspezifische URLs der Testobjekte        | OpenShift (pro Umgebung)             |
 | OpenShift Secrets / Vault            | API-Tokens, Zugangsdaten der Testobjekte         | Secret-Management                    |
 | JavaFaker                            | Dynamische Testdaten (Namen, Zeitstempel, etc.)  | Zur Laufzeit generiert               |
-| Log-Testdaten-Generator              | Vordefinierte Log-Eintraege fuer Logviewer-Tests | Skript / API im Backend-Verbund      |
+| Log-Testdaten-Generator              | Vordefinierte Log-Einträge für Logviewer-Tests | Skript / API im Backend-Verbund      |
 | Datenbank-Seeding                    | Ausgangszustand der Backend-Datenbanken          | Migrations-Skripte / Fixtures        |
 
 ### 8.3 Testdaten-Lebenszyklus
@@ -546,13 +546,13 @@ Feature-Branch Push (Logviewer)
 ```
 Vor dem Test ──► 1. Testobjekte deployen (CI/CD-Pipeline)
                ► 2. Datenbank in Ausgangszustand bringen (Seeding)
-               ► 3. Test-Log-Daten generieren (fuer Logviewer-Tests)
+               ► 3. Test-Log-Daten generieren (für Logviewer-Tests)
                         │
-Waehrend des Tests ──► Cucumber Test Service fuehrt Tests aus
+Während des Tests ──► Cucumber Test Service führt Tests aus
                       ► Testdaten werden gelesen / erzeugt / validiert
                         │
 Nach dem Test ──► Ergebnisse im PVC gespeichert (isoliert pro RunId)
-               ► Optional: Testdaten zuruecksetzen
+               ► Optional: Testdaten zurücksetzen
 ```
 
 ---
@@ -561,20 +561,20 @@ Nach dem Test ──► Ergebnisse im PVC gespeichert (isoliert pro RunId)
 
 ### 9.1 Automatisiertes Reporting (via Cucumber Test Service)
 
-Alle automatisierten Reports werden pro Testlauf (RunId) im Cucumber Test Service erzeugt und sind ueber HTTP abrufbar:
+Alle automatisierten Reports werden pro Testlauf (RunId) im Cucumber Test Service erzeugt und sind über HTTP abrufbar:
 
 | Report-Typ            | Format      | Erzeugung                              | Zugang                                          |
 |-----------------------|-------------|----------------------------------------|--------------------------------------------------|
 | **Allure Report**     | HTML        | Automatisch nach Testlauf              | `/reports/{runId}/allure-report/index.html`       |
 | **Cucumber Report**   | JSON + HTML | Automatisch nach Testlauf              | `/reports/{runId}/cucumber-reports/`              |
-| **Axe Uebersicht**    | HTML        | Automatisch nach jedem Axe-Scan        | `/reports/{runId}/axe-result/index.html`          |
-| **Axe Einzelbericht** | JSON + HTML | Pro gepruefter Seite im Logviewer      | `/reports/{runId}/axe-result/{scan}.html`         |
-| **JUnit XML**         | XML         | Fuer CI/CD-Integration                 | Im Testlauf-Verzeichnis                           |
+| **Axe Übersicht**    | HTML        | Automatisch nach jedem Axe-Scan        | `/reports/{runId}/axe-result/index.html`          |
+| **Axe Einzelbericht** | JSON + HTML | Pro geprüfter Seite im Logviewer      | `/reports/{runId}/axe-result/{scan}.html`         |
+| **JUnit XML**         | XML         | Für CI/CD-Integration                 | Im Testlauf-Verzeichnis                           |
 | **Screenshots**       | PNG         | Bei Testfehlern + nach Aktionen        | `/reports/{runId}/screenshots/`                   |
 
 ### 9.2 Zephyr Scale Integration (geplant)
 
-Nach jedem automatisierten Testlauf werden die Ergebnisse automatisch an Zephyr Scale uebertragen:
+Nach jedem automatisierten Testlauf werden die Ergebnisse automatisch an Zephyr Scale übertragen:
 
 ```
 Testlauf im Cucumber Test Service abgeschlossen
@@ -591,12 +591,12 @@ Tekton Task: upload-to-zephyr
 **Mapping:**
 - Cucumber-Tags (`@T-XXXX`) → Zephyr Scale Testfall-IDs
 - Cucumber-Szenario-Status → Zephyr Execution-Status (Passed/Failed/Blocked)
-- Allure-Report-URL → Verknuepfung im Zephyr-Testlauf
+- Allure-Report-URL → Verknüpfung im Zephyr-Testlauf
 - Testobjekt (Backend-Verbund / Logviewer) → Zephyr-Testplan/Zyklus
 
 ### 9.3 Manuelles Reporting
 
-| Aktivitaet                          | Tool                    | Verantwortlich     |
+| Aktivität                          | Tool                    | Verantwortlich     |
 |-------------------------------------|-------------------------|--------------------|
 | Manuelle Testergebnisse erfassen    | Zephyr Scale (Jira)     | Testteam           |
 | Fehlermeldungen erstellen           | Jira                    | Testteam           |
@@ -607,7 +607,7 @@ Tekton Task: upload-to-zephyr
 
 ## 10. Testfallermittlung
 
-### 10.1 Quellen fuer die Testfallermittlung
+### 10.1 Quellen für die Testfallermittlung
 
 ```
 ┌───────────────────┐     ┌───────────────────┐     ┌───────────────────┐
@@ -624,10 +624,10 @@ Tekton Task: upload-to-zephyr
             ┌─────────────────────┐
             │  Testfallableitung  │
             │                     │
-            │  1. Positive Faelle │
-            │  2. Negative Faelle │
+            │  1. Positive Fälle │
+            │  2. Negative Fälle │
             │  3. Grenzwerte      │
-            │  4. Randfaelle      │
+            │  4. Randfälle      │
             │  5. Fehlerpfade     │
             └────────┬────────────┘
                      │
@@ -635,9 +635,9 @@ Tekton Task: upload-to-zephyr
          ▼           ▼               ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
 │  Automatisiert│ │  Manuell     │ │  Zephyr Scale    │
-│  (Cucumber   │ │  (Integr. +  │ │  (alle Testfaelle│
+│  (Cucumber   │ │  (Integr. +  │ │  (alle Testfälle│
 │   Feature-   │ │   Fehler-    │ │   dokumentiert   │
-│   Files im   │ │   handling + │ │   und verknuepft)│
+│   Files im   │ │   handling + │ │   und verknüpft)│
 │   Cucumber   │ │   Gesamt-    │ │                  │
 │   Test Svc)  │ │   integration│ │                  │
 └──────────────┘ └──────────────┘ └──────────────────┘
@@ -648,9 +648,9 @@ Tekton Task: upload-to-zephyr
 | Quelle                     | Ableitungsmethode                                               | Beispiel                                                   |
 |----------------------------|-----------------------------------------------------------------|------------------------------------------------------------|
 | **Aktuelle Umsetzung**     | Bestehende UI-Workflows analysieren und in Gherkin abbilden     | Log-Tabelle → LogView.feature                              |
-| **Fachkonzept**            | Geschaeftsregeln als Szenarien formulieren                      | "Benutzer kann Logs nach Severity filtern"                 |
-| **User Stories**           | Akzeptanzkriterien 1:1 in Scenarios uebersetzen                 | AC: "Filterergebnis zeigt nur ERROR-Logs" → Then-Step      |
-| **Architekturbilder**      | Seitenuebergaenge und Datenfluss testen                         | Navigation: Login → Dashboard → Log-Detail → Export        |
+| **Fachkonzept**            | Geschäftsregeln als Szenarien formulieren                      | "Benutzer kann Logs nach Severity filtern"                 |
+| **User Stories**           | Akzeptanzkriterien 1:1 in Scenarios übersetzen                 | AC: "Filterergebnis zeigt nur ERROR-Logs" → Then-Step      |
+| **Architekturbilder**      | Seitenübergänge und Datenfluss testen                         | Navigation: Login → Dashboard → Log-Detail → Export        |
 | **WCAG-Richtlinien**       | Barrierefreiheitsanforderungen als Axe-Scans einbetten          | Farbkontrast, Alt-Texte, Tastaturnavigation, Screenreader  |
 
 ### 10.3 Backend-Testfallermittlung (Backend-Verbund)
@@ -658,53 +658,53 @@ Tekton Task: upload-to-zephyr
 | Quelle                     | Ableitungsmethode                                               | Beispiel                                                   |
 |----------------------------|-----------------------------------------------------------------|------------------------------------------------------------|
 | **Aktuelle Umsetzung**     | Vorhandene Endpunkte und Datenmodelle analysieren               | GET /logs → Paginierung, Filterparameter testen            |
-| **API-Spezifikation**      | Swagger/OpenAPI-Definition als Grundlage                        | Alle Endpunkte mit gueltigem/ungueltigem Request           |
-| **Fachkonzept**            | Geschaeftslogik der einzelnen Services testen                   | "Log-Aggregation fasst Eintraege korrekt zusammen"         |
-| **User Stories**           | Akzeptanzkriterien auf API-Ebene uebersetzen                    | "Logs koennen nach Zeitraum abgefragt werden" → GET /logs?from=&to= |
+| **API-Spezifikation**      | Swagger/OpenAPI-Definition als Grundlage                        | Alle Endpunkte mit gültigem/ungültigem Request           |
+| **Fachkonzept**            | Geschäftslogik der einzelnen Services testen                   | "Log-Aggregation fasst Einträge korrekt zusammen"         |
+| **User Stories**           | Akzeptanzkriterien auf API-Ebene übersetzen                    | "Logs können nach Zeitraum abgefragt werden" → GET /logs?from=&to= |
 | **Architekturbilder**      | Service-Kommunikation und Fehlerverhalten testen                | Service A → Service B: Daten korrekt weitergeleitet        |
 
 ---
 
-## 11. Best Practices fuer API-Tests
+## 11. Best Practices für API-Tests
 
 ### 11.1 Teststruktur (Given-When-Then)
 
 ```gherkin
 # EMPFOHLEN: Klare Trennung von Vorbedingung, Aktion und Erwartung
 @Backend @T-1234
-Scenario: Log-Eintraege nach Severity filtern
+Scenario: Log-Einträge nach Severity filtern
   Given API Basis-URL des Backend-Verbunds ist gesetzt
-  When ich GET an "/api/logs?severity=ERROR" ausfuehre
+  When ich GET an "/api/logs?severity=ERROR" ausführe
   Then ist der Statuscode 200
-  And enthaelt die Antwort nur Eintraege mit Severity "ERROR"
+  And enthält die Antwort nur Einträge mit Severity "ERROR"
 ```
 
-### 11.2 Grundsaetze
+### 11.2 Grundsätze
 
 | Regel                                    | Beschreibung                                                          |
 |------------------------------------------|-----------------------------------------------------------------------|
-| **Unabhaengige Tests**                   | Jedes Szenario laeuft isoliert, keine Abhaengigkeit zwischen Tests    |
-| **Idempotenz**                           | Tests koennen beliebig oft wiederholt werden ohne Seiteneffekte       |
+| **Unabhängige Tests**                   | Jedes Szenario läuft isoliert, keine Abhängigkeit zwischen Tests    |
+| **Idempotenz**                           | Tests können beliebig oft wiederholt werden ohne Seiteneffekte       |
 | **Sprechende Namen**                     | Scenario-Titel beschreibt das erwartete Verhalten                     |
-| **Status-Code-Pruefung zuerst**          | Immer zuerst den HTTP-Statuscode pruefen, dann den Body              |
+| **Status-Code-Prüfung zuerst**          | Immer zuerst den HTTP-Statuscode prüfen, dann den Body              |
 | **Schema-Validierung**                   | JSON-Response gegen Schema validieren (REST Assured JSON Schema)      |
 | **Negative Tests**                       | Mindestens 1 negativer Testfall pro Endpunkt (400, 401, 404, 500)    |
-| **Allure-Annotations**                   | `@Allure.step` fuer jeden relevanten Schritt im Report               |
+| **Allure-Annotations**                   | `@Allure.step` für jeden relevanten Schritt im Report               |
 | **Request/Response loggen**              | AllureRestAssuredHook haengt HTTP-Details automatisch an              |
 | **Timeouts definieren**                  | Explizite Timeouts setzen, nicht auf Defaults verlassen               |
-| **Konfigurierbare Basis-URL**            | URLs nie hardcoden, immer ueber ConfigReader / Umgebungsvariable      |
-| **Tags fuer Testobjekte**               | `@Backend` vs. `@Logviewer` zur Zuordnung der Tests                  |
-| **Tags fuer Testmanagement**            | `@T-XXXX` fuer Zephyr-Scale-Verknuepfung                             |
+| **Konfigurierbare Basis-URL**            | URLs nie hardcoden, immer über ConfigReader / Umgebungsvariable      |
+| **Tags für Testobjekte**               | `@Backend` vs. `@Logviewer` zur Zuordnung der Tests                  |
+| **Tags für Testmanagement**            | `@T-XXXX` für Zephyr-Scale-Verknüpfung                             |
 
 ### 11.3 Anti-Patterns (vermeiden)
 
 | Anti-Pattern                   | Warum problematisch                                     | Besser                                     |
 |--------------------------------|---------------------------------------------------------|--------------------------------------------|
-| Testabhaengigkeiten            | Test B braucht Ergebnis von Test A                      | Eigenes Setup pro Szenario                 |
+| Testabhängigkeiten            | Test B braucht Ergebnis von Test A                      | Eigenes Setup pro Szenario                 |
 | Sleep/Wait                     | Fragil und verlangsamt Tests                            | Polling mit Timeout                        |
 | Hardcodierte URLs              | Bricht bei Umgebungswechsel                             | `ConfigReader.get("apiURL")`               |
-| Zu breite Assertions           | `body is not null` prueft fast nichts                   | Spezifische Felder und Werte pruefen       |
-| Alles in einem Szenario        | Ein Szenario prueft 10 verschiedene Dinge               | Ein Szenario = ein Verhalten               |
+| Zu breite Assertions           | `body is not null` prüft fast nichts                   | Spezifische Felder und Werte prüfen       |
+| Alles in einem Szenario        | Ein Szenario prüft 10 verschiedene Dinge               | Ein Szenario = ein Verhalten               |
 | Fehlende Testobjekt-Tags       | Unklar welches SUT getestet wird                        | `@Backend` oder `@Logviewer` immer setzen  |
 
 ---
@@ -787,7 +787,7 @@ Scenario: Log-Eintraege nach Severity filtern
 │  │  Dynamische Namespaces (pro Feature-Branch des Logviewers)              │ │
 │  │                                                                         │ │
 │  │  ┌──────────────────────┐  ┌──────────────────────┐                    │ │
-│  │  │  NS: feature-abc-123  │  │  NS: feature-xyz-456  │  ◄── Temporaer   │ │
+│  │  │  NS: feature-abc-123  │  │  NS: feature-xyz-456  │  ◄── Temporär   │ │
 │  │  │  Logviewer + Backend  │  │  Logviewer + Backend  │      (Branch-     │ │
 │  │  │  (Smoke-Tests)        │  │  (Smoke-Tests)        │       Lebensdauer)│ │
 │  │  └──────────────────────┘  └──────────────────────┘                    │ │
@@ -796,7 +796,7 @@ Scenario: Log-Eintraege nach Severity filtern
 │  ┌──────────────────────┐                                                    │
 │  │  NS: test-automation  │  ◄── Cucumber Test Service (permanent)            │
 │  │  cucumber-test-service│                                                    │
-│  │  + PVC fuer Ergebnisse│                                                    │
+│  │  + PVC für Ergebnisse│                                                    │
 │  └──────────────────────┘                                                    │
 │                                                                              │
 │  ┌──────────────────────┐                                                    │
@@ -825,20 +825,20 @@ Scenario: Log-Eintraege nach Severity filtern
 
 ### 13.1 Fehlerklassifizierung
 
-| Prioritaet     | Beschreibung                                                    | Reaktionszeit     | Behebungszeit     |
+| Priorität     | Beschreibung                                                    | Reaktionszeit     | Behebungszeit     |
 |----------------|-----------------------------------------------------------------|-------------------|-------------------|
-| **Kritisch**   | System unbenutzbar, Datenverlust, Sicherheitsluecke             | Sofort            | Innerhalb 4 Std   |
-| **Hoch**       | Kernfunktion eingeschraenkt, kein Workaround                    | Innerhalb 2 Std   | Innerhalb 1 Tag   |
-| **Mittel**     | Funktion eingeschraenkt, Workaround vorhanden                   | Innerhalb 1 Tag   | Innerhalb 3 Tage  |
-| **Niedrig**    | Kosmetisch, geringe Auswirkung                                  | Innerhalb 2 Tage  | Naechstes Release  |
+| **Kritisch**   | System unbenutzbar, Datenverlust, Sicherheitslücke             | Sofort            | Innerhalb 4 Std   |
+| **Hoch**       | Kernfunktion eingeschränkt, kein Workaround                    | Innerhalb 2 Std   | Innerhalb 1 Tag   |
+| **Mittel**     | Funktion eingeschränkt, Workaround vorhanden                   | Innerhalb 1 Tag   | Innerhalb 3 Tage  |
+| **Niedrig**    | Kosmetisch, geringe Auswirkung                                  | Innerhalb 2 Tage  | Nächstes Release  |
 
 ### 13.2 Fehler-Lebenszyklus
 
 ```
-  Neu ──► In Analyse ──► In Bearbeitung ──► Geloest ──► Verifiziert ──► Geschlossen
+  Neu ──► In Analyse ──► In Bearbeitung ──► Gelöst ──► Verifiziert ──► Geschlossen
    │                          │                              │
    │                          ▼                              ▼
-   │                    Zurueckgewiesen               Wieder geoeffnet
+   │                    Zurückgewiesen               Wieder geöffnet
    │                    (kein Fehler /                (Verifikation
    ▼                     Duplikat)                     fehlgeschlagen)
  Abgelehnt
@@ -852,17 +852,17 @@ Jeder Fehler wird in **Jira** erfasst mit folgenden Pflichtfeldern:
 |----------------------|------------------------------------------------------------------|
 | Zusammenfassung      | Kurzbeschreibung des Fehlers                                     |
 | Betroffenes System   | Backend-Verbund (Service A/B/C) / Logviewer                      |
-| Prioritaet           | Kritisch / Hoch / Mittel / Niedrig                               |
+| Priorität           | Kritisch / Hoch / Mittel / Niedrig                               |
 | Umgebung             | dynamisch / develop / test / acceptance                          |
 | Schritte zur Reproduktion | Nummerierte Schritte                                        |
-| Erwartetes Ergebnis  | Was haette passieren sollen                                      |
-| Tatsaechliches Ergebnis | Was tatsaechlich passiert ist                                 |
-| Screenshots / Logs   | Allure-Report-Link, Axe-Report-Link, Screenshots, Log-Auszuege  |
+| Erwartetes Ergebnis  | Was hätte passieren sollen                                      |
+| Tatsächliches Ergebnis | Was tatsächlich passiert ist                                 |
+| Screenshots / Logs   | Allure-Report-Link, Axe-Report-Link, Screenshots, Log-Auszüge  |
 | Testfall-Referenz    | Zephyr Scale Testfall-ID (`T-XXXX`)                              |
 
 ### 13.4 Fehlerquellen und Zuordnung
 
-| Fehlerquelle                          | Testobjekt          | Zustaendig fuer Behebung   | Zustaendig fuer Verifikation     |
+| Fehlerquelle                          | Testobjekt          | Zuständig für Behebung   | Zuständig für Verifikation     |
 |---------------------------------------|---------------------|----------------------------|----------------------------------|
 | Unit-Test-Fehler                      | Jeweiliges Projekt  | Entwicklung des Projekts   | Entwicklung (automatisch)        |
 | Automatisierter Integrationstest      | Backend-Verbund     | Backend-Entwicklung        | Testteam (via Cucumber Test Svc) |
@@ -879,5 +879,5 @@ Jeder Fehler wird in **Jira** erfasst mit folgenden Pflichtfeldern:
 | Stufe | Bedingung                                               | Eskalation an        |
 |-------|---------------------------------------------------------|----------------------|
 | 1     | Fehler wird nicht innerhalb der Reaktionszeit bearbeitet | Teamleitung          |
-| 2     | Behebungszeit ueberschritten                             | Projektleitung       |
-| 3     | Release-Blocker ohne Loesung                             | Management / Steering|
+| 2     | Behebungszeit überschritten                             | Projektleitung       |
+| 3     | Release-Blocker ohne Lösung                             | Management / Steering|

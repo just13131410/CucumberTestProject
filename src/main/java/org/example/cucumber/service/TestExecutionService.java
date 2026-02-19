@@ -13,7 +13,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -409,23 +412,33 @@ public class TestExecutionService {
             Path combinedReportDir = getBaseResultsPath().resolve("combined").resolve("allure-report");
             Files.createDirectories(combinedReportDir);
 
+            // Read timestamps and sort runs ascending by time (oldest = buildOrder 1, newest = N)
+            // so that Allure trend chart is chronologically correct (left=old, right=new)
+            record RunEntry(UUID id, long timestamp) {}
+            List<RunEntry> sortedRuns = validRunIds.stream()
+                    .map(id -> new RunEntry(id,
+                            readTimestampFromExecutorJson(getResultsPath(id).resolve("allure-results"))))
+                    .sorted(Comparator.comparingLong(RunEntry::timestamp))
+                    .collect(Collectors.toList());
+
             // Create temp directory with enriched copies of all allure-results
             tempDir = Files.createTempDirectory("allure-combined-");
-            for (int i = 0; i < validRunIds.size(); i++) {
-                UUID id = validRunIds.get(i);
-                Path sourceDir = getResultsPath(id).resolve("allure-results");
-                Path targetDir = tempDir.resolve(id.toString());
-                copyAndEnrichResults(sourceDir, targetDir, id, i + 1);
+            for (int i = 0; i < sortedRuns.size(); i++) {
+                RunEntry run = sortedRuns.get(i);
+                Path sourceDir = getResultsPath(run.id()).resolve("allure-results");
+                Path targetDir = tempDir.resolve(run.id().toString());
+                copyAndEnrichResults(sourceDir, targetDir, run.id(), i + 1, run.timestamp());
             }
 
-            // Copy history from previous combined report (enables trends)
-            copyHistory(combinedReportDir, tempDir.resolve(validRunIds.getFirst().toString()));
+            // Copy history from previous combined report to newest run's temp dir (enables trends)
+            UUID newestId = sortedRuns.getLast().id();
+            copyHistory(combinedReportDir, tempDir.resolve(newestId.toString()));
 
-            // Build allure generate command with enriched temp dirs
+            // Build allure generate command with runs in ascending time order
             List<String> command = new ArrayList<>(List.of(allureCommand));
             command.add("generate");
-            for (UUID id : validRunIds) {
-                command.add(tempDir.resolve(id.toString()).toString());
+            for (RunEntry run : sortedRuns) {
+                command.add(tempDir.resolve(run.id().toString()).toString());
             }
             command.add("-o");
             command.add(combinedReportDir.toString());
@@ -504,13 +517,26 @@ public class TestExecutionService {
         }
     }
 
-    private void copyAndEnrichResults(Path sourceDir, Path targetDir, UUID runId, int buildOrder) throws IOException {
+    private static final DateTimeFormatter RUN_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
+
+    private void copyAndEnrichResults(Path sourceDir, Path targetDir, UUID runId,
+                                      long buildOrder, long runTimestamp) throws IOException {
         Files.createDirectories(targetDir);
         String runLabel = runId.toString().substring(0, 8);
 
+        // Format the run timestamp as yyyyMMddHHmm (e.g. 202602191316)
+        String formattedDate = runTimestamp > 0
+                ? LocalDateTime.ofInstant(Instant.ofEpochMilli(runTimestamp), ZoneId.systemDefault())
+                        .format(RUN_DATE_FMT)
+                : "";
+
         // Read tags from existing executor.json (written during test execution)
         String runTags = readTagsFromExecutorJson(sourceDir);
-        String suiteLabel = runTags.isEmpty() ? "Run " + runLabel : "Run " + runLabel + " " + runTags;
+
+        // Build label:  Run <shortId> <yyyyMMddHHmm> <tags>
+        String suiteLabel = "Run " + runLabel
+                + (formattedDate.isEmpty() ? "" : " " + formattedDate)
+                + (runTags.isEmpty()       ? "" : " " + runTags);
 
         try (var files = Files.list(sourceDir)) {
             files.forEach(source -> {
@@ -580,6 +606,22 @@ public class TestExecutionService {
             log.warn("Failed to read executor.json from {}", allureResultsDir, e);
         }
         return "";
+    }
+
+    /** Reads the buildOrder field (Unix timestamp in ms) from a run's executor.json. */
+    private long readTimestampFromExecutorJson(Path allureResultsDir) {
+        Path executorFile = allureResultsDir.resolve("executor.json");
+        if (!Files.exists(executorFile)) return 0L;
+        try {
+            String content = Files.readString(executorFile);
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"buildOrder\"\\s*:\\s*(\\d+)")
+                    .matcher(content);
+            if (m.find()) return Long.parseLong(m.group(1));
+        } catch (IOException e) {
+            log.warn("Failed to read timestamp from executor.json at {}", allureResultsDir, e);
+        }
+        return 0L;
     }
 
     private void writeExecutorJson(UUID runId, TestExecutionRequest request) {

@@ -2,36 +2,36 @@
 
 ## Inhaltsverzeichnis
 
-1. [Ueberblick](#ueberblick)
+1. [Überblick](#überblick)
 2. [Basis-URL](#basis-url)
 3. [Swagger UI](#swagger-ui)
 4. [Endpoints](#endpoints)
    - [Health Check](#1-health-check)
-   - [Test starten](#2-test-ausfuehrung-starten)
-   - [Status abfragen](#3-status-einer-test-ausfuehrung-abfragen)
+   - [Test starten](#2-test-ausführung-starten)
+   - [Status abfragen](#3-status-einer-test-ausführung-abfragen)
    - [Aktive Tests anzeigen](#4-alle-aktiven-tests-anzeigen)
    - [Report abrufen](#5-test-report-abrufen)
    - [Allure-Report generieren](#6-allure-report-generieren)
    - [Report-URL abrufen](#7-allure-report-url-abrufen)
-   - [Test abbrechen](#8-test-ausfuehrung-abbrechen)
-   - [Test loeschen](#9-test-ausfuehrung-loeschen)
+   - [Test abbrechen](#8-test-ausführung-abbrechen)
+   - [Test löschen](#9-test-ausführung-löschen)
    - [Statistiken](#10-statistiken-abrufen)
-   - [Verfuegbare Runs auflisten](#11-verfuegbare-runs-auflisten)
+   - [Verfügbare Runs auflisten](#11-verfügbare-runs-auflisten)
    - [Kombinierten Report generieren](#12-kombinierten-allure-report-generieren)
 5. [Typischer Workflow](#typischer-workflow)
-6. [Parallele Ausfuehrung](#parallele-ausfuehrung-mehrere-teams)
-7. [Verfuegbare Tags](#verfuegbare-test-tags)
+6. [Parallele Ausführung](#parallele-ausführung-mehrere-teams)
+7. [Verfügbare Tags](#verfügbare-test-tags)
 8. [Fehlerbehebung](#fehlerbehebung)
 
 ---
 
-## Ueberblick
+## Überblick
 
-Der Cucumber Test Service stellt eine REST API bereit, ueber die Teams automatisierte Backend- und Frontend-Tests ausloesen koennen. Der Dienst laeuft auf OpenShift und unterstuetzt die gleichzeitige Ausfuehrung mehrerer Test-Laeufe mit isolierten Ergebnissen pro Lauf.
+Der Cucumber Test Service stellt eine REST API bereit, über die Teams automatisierte Backend- und Frontend-Tests auslösen können. Der Dienst läuft auf OpenShift und unterstützt die gleichzeitige Ausführung mehrerer Test-Läufe mit isolierten Ergebnissen pro Lauf.
 
 **Basis-Pfad:** `/api/v1/test`
 **Content-Type:** `application/json`
-**Max. gleichzeitige Laeufe:** 5
+**Max. gleichzeitige Läufe:** 5
 
 ---
 
@@ -52,7 +52,7 @@ Die interaktive API-Dokumentation ist unter folgendem Pfad erreichbar:
 <BASIS-URL>/swagger-ui.html
 ```
 
-Dort koennen alle Endpoints direkt im Browser ausprobiert werden.
+Dort können alle Endpoints direkt im Browser ausprobiert werden.
 
 ---
 
@@ -60,7 +60,7 @@ Dort koennen alle Endpoints direkt im Browser ausprobiert werden.
 
 ### 1. Health Check
 
-Prueft, ob der Service verfuegbar ist.
+Prüft, ob der Service verfügbar ist.
 
 **Request:**
 ```
@@ -81,9 +81,9 @@ curl http://localhost:8080/api/v1/test/health
 
 ---
 
-### 2. Test-Ausfuehrung starten
+### 2. Test-Ausführung starten
 
-Startet eine neue Test-Ausfuehrung. Der Aufruf ist asynchron - die Tests werden im Hintergrund ausgefuehrt und der Endpoint gibt sofort eine Run-ID zurueck.
+Startet eine neue Test-Ausführung. Der Aufruf ist asynchron - die Tests werden im Hintergrund ausgeführt und der Endpoint gibt sofort eine Run-ID zurück.
 
 **Request:**
 ```
@@ -99,14 +99,14 @@ Content-Type: application/json
 | `tags`                | Liste (Strings)  | Ja      | Cucumber-Tags zum Filtern der Tests                    |
 | `features`            | Liste (Strings)  | Nein    | Spezifische Feature-Dateien                            |
 | `parallelCount`       | Integer          | Nein    | Anzahl paralleler Threads (Standard: 5)                |
-| `browser`             | String           | Nein    | Browser fuer UI-Tests: `chromium`, `firefox`, `webkit` |
+| `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `firefox`, `webkit` |
 | `environmentVariables`| Map              | Nein    | Benutzerdefinierte Umgebungsvariablen                  |
 | `retryFailedTests`    | Boolean          | Nein    | Fehlgeschlagene Tests wiederholen (Standard: true)     |
 | `maxRetries`          | Integer          | Nein    | Max. Wiederholungsversuche (Standard: 2)               |
 | `timeoutMinutes`      | Integer          | Nein    | Timeout in Minuten (Standard: 30)                      |
-| `webhookUrl`          | String           | Nein    | URL fuer Ergebnis-Benachrichtigung                     |
+| `webhookUrl`          | String           | Nein    | URL für Ergebnis-Benachrichtigung                     |
 | `priority`            | String           | Nein    | `LOW`, `NORMAL`, `HIGH`, `CRITICAL` (Standard: NORMAL) |
-| `initiator`           | String           | Nein    | Wer den Test ausloest (z.B. Pipeline-Name)             |
+| `initiator`           | String           | Nein    | Wer den Test auslöst (z.B. Pipeline-Name)             |
 
 **Beispiel - Smoke Tests starten:**
 ```bash
@@ -162,13 +162,13 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
 
 | Code | Bedeutung                                      |
 |------|-------------------------------------------------|
-| 400  | Ungueltige Parameter (z.B. fehlende Tags)       |
-| 429  | Maximale Anzahl gleichzeitiger Laeufe erreicht  |
+| 400  | Ungültige Parameter (z.B. fehlende Tags)       |
+| 429  | Maximale Anzahl gleichzeitiger Läufe erreicht  |
 | 500  | Interner Serverfehler                           |
 
 ---
 
-### 3. Status einer Test-Ausfuehrung abfragen
+### 3. Status einer Test-Ausführung abfragen
 
 Fragt den aktuellen Stand eines laufenden oder abgeschlossenen Test-Laufs ab.
 
@@ -198,16 +198,16 @@ curl http://localhost:8080/api/v1/test/status/550e8400-e29b-41d4-a716-4466554400
 }
 ```
 
-**Moegliche Status-Werte:**
+**Mögliche Status-Werte:**
 
 | Status      | Bedeutung                                          |
 |-------------|-----------------------------------------------------|
 | `QUEUED`    | Test ist eingeplant, wartet auf freien Slot          |
-| `RUNNING`   | Test wird gerade ausgefuehrt                         |
+| `RUNNING`   | Test wird gerade ausgeführt                         |
 | `COMPLETED` | Alle Tests erfolgreich abgeschlossen                 |
 | `FAILED`    | Tests abgeschlossen, aber mit Fehlern                |
 | `CANCELLED` | Test wurde manuell abgebrochen                       |
-| `TIMEOUT`   | Test hat das Zeitlimit ueberschritten                |
+| `TIMEOUT`   | Test hat das Zeitlimit überschritten                |
 
 **Fehler:**
 
@@ -219,7 +219,7 @@ curl http://localhost:8080/api/v1/test/status/550e8400-e29b-41d4-a716-4466554400
 
 ### 4. Alle aktiven Tests anzeigen
 
-Zeigt alle aktuell laufenden und wartenden Test-Ausfuehrungen an.
+Zeigt alle aktuell laufenden und wartenden Test-Ausführungen an.
 
 **Request:**
 ```
@@ -265,20 +265,20 @@ GET /api/v1/test/report/{runId}
 curl http://localhost:8080/api/v1/test/report/550e8400-e29b-41d4-a716-446655440000
 ```
 
-**Response (200):** Cucumber JSON-Report (vollstaendiger Testbericht)
+**Response (200):** Cucumber JSON-Report (vollständiger Testbericht)
 
 **Fehler:**
 
 | Code | Bedeutung                              |
 |------|----------------------------------------|
 | 404  | Report nicht gefunden                   |
-| 425  | Test laeuft noch - Report nicht bereit  |
+| 425  | Test läuft noch - Report nicht bereit  |
 
 ---
 
 ### 6. Allure-Report generieren
 
-Generiert einen HTML Allure-Report fuer eine Test-Ausfuehrung und gibt die URL zum Report zurueck.
+Generiert einen HTML Allure-Report für eine Test-Ausführung und gibt die URL zum Report zurück.
 
 **Request:**
 ```
@@ -301,11 +301,11 @@ curl -X POST http://localhost:8080/api/v1/test/report/550e8400-e29b-41d4-a716-44
 
 **Hinweise:**
 - Der Report wird als statische HTML-Seite generiert und unter `/reports/{runId}/allure-report/` bereitgestellt
-- Die `reportUrl` kann direkt im Browser geoeffnet werden
+- Die `reportUrl` kann direkt im Browser geöffnet werden
 - **Voraussetzung:** Allure CLI muss auf dem Server installiert sein
 - Die Report-Generierung dauert je nach Testumfang 5-30 Sekunden
 
-**Enthaltene Anhaenge im Allure-Report:**
+**Enthaltene Anhänge im Allure-Report:**
 
 | Anhangstyp                   | Beschreibung                                                                 |
 |------------------------------|------------------------------------------------------------------------------|
@@ -319,20 +319,20 @@ Der Axe-Report ist auch ohne Allure-Generierung direkt aufrufbar:
 ```
 GET /reports/{runId}/axe-result/index.html
 ```
-Pro Seiten-URL wird innerhalb eines Runs genau ein Scan durchgefuehrt (Deduplizierung).
+Pro Seiten-URL wird innerhalb eines Runs genau ein Scan durchgeführt (Deduplizierung).
 
 **Fehler:**
 
 | Code | Bedeutung                                      |
 |------|------------------------------------------------|
-| 404  | Test-Ausfuehrung nicht gefunden                 |
+| 404  | Test-Ausführung nicht gefunden                 |
 | 500  | Fehler bei Report-Generierung (z.B. Allure CLI nicht installiert) |
 
 ---
 
 ### 7. Allure Report-URL abrufen
 
-Gibt die URL zu einem bereits generierten Allure-Report zurueck (ohne Neu-Generierung).
+Gibt die URL zu einem bereits generierten Allure-Report zurück (ohne Neu-Generierung).
 
 **Request:**
 ```
@@ -359,9 +359,9 @@ curl http://localhost:8080/api/v1/test/report/550e8400-e29b-41d4-a716-4466554400
 
 ---
 
-### 8. Test-Ausfuehrung abbrechen
+### 8. Test-Ausführung abbrechen
 
-Bricht eine laufende Test-Ausfuehrung ab.
+Bricht eine laufende Test-Ausführung ab.
 
 **Request:**
 ```
@@ -391,9 +391,9 @@ curl -X DELETE http://localhost:8080/api/v1/test/cancel/550e8400-e29b-41d4-a716-
 
 ---
 
-### 9. Test-Ausfuehrung loeschen
+### 9. Test-Ausführung löschen
 
-Loescht eine abgeschlossene Test-Ausfuehrung und alle zugehoerigen Reports. Laufende Tests koennen nicht geloescht werden.
+Löscht eine abgeschlossene Test-Ausführung und alle zugehörigen Reports. Laufende Tests können nicht gelöscht werden.
 
 **Request:**
 ```
@@ -405,19 +405,19 @@ DELETE /api/v1/test/{runId}
 curl -X DELETE http://localhost:8080/api/v1/test/550e8400-e29b-41d4-a716-446655440000
 ```
 
-**Response:** `204 No Content` (erfolgreich geloescht)
+**Response:** `204 No Content` (erfolgreich gelöscht)
 
 **Fehler:**
 
 | Code | Bedeutung                                          |
 |------|-----------------------------------------------------|
-| 404  | Run-ID nicht gefunden oder Test laeuft noch          |
+| 404  | Run-ID nicht gefunden oder Test läuft noch          |
 
 ---
 
 ### 10. Statistiken abrufen
 
-Gibt aggregierte Statistiken ueber alle Test-Ausfuehrungen zurueck. Optional nach Umgebung filterbar.
+Gibt aggregierte Statistiken über alle Test-Ausführungen zurück. Optional nach Umgebung filterbar.
 
 **Request:**
 ```
@@ -429,7 +429,7 @@ GET /api/v1/test/statistics?environment=dev
 ```bash
 curl http://localhost:8080/api/v1/test/statistics
 
-# Nur fuer eine bestimmte Umgebung:
+# Nur für eine bestimmte Umgebung:
 curl http://localhost:8080/api/v1/test/statistics?environment=staging
 ```
 
@@ -448,9 +448,9 @@ curl http://localhost:8080/api/v1/test/statistics?environment=staging
 
 ---
 
-### 11. Verfuegbare Runs auflisten
+### 11. Verfügbare Runs auflisten
 
-Listet alle Test-Runs auf, die Allure-Ergebnisse auf dem Dateisystem enthalten. Nuetzlich, um Run-IDs fuer den kombinierten Report auszuwaehlen.
+Listet alle Test-Runs auf, die Allure-Ergebnisse auf dem Dateisystem enthalten. Nützlich, um Run-IDs für den kombinierten Report auszuwählen.
 
 **Request:**
 ```
@@ -471,14 +471,14 @@ curl http://localhost:8080/api/v1/test/runs
 ```
 
 **Hinweise:**
-- Es werden nur Runs zurueckgegeben, die ein `allure-results/`-Verzeichnis enthalten
+- Es werden nur Runs zurückgegeben, die ein `allure-results/`-Verzeichnis enthalten
 - Die Liste basiert auf dem Dateisystem, nicht auf dem In-Memory-Status
 
 ---
 
 ### 12. Kombinierten Allure-Report generieren
 
-Generiert einen uebergreifenden Allure-Report ueber mehrere Test-Runs. Der kombinierte Report wird unter `/reports/combined/allure-report/index.html` bereitgestellt.
+Generiert einen übergreifenden Allure-Report über mehrere Test-Runs. Der kombinierte Report wird unter `/reports/combined/allure-report/index.html` bereitgestellt.
 
 **Request:**
 ```
@@ -490,7 +490,7 @@ Content-Type: application/json
 
 | Feld     | Typ             | Pflicht | Beschreibung                                        |
 |----------|-----------------|---------|-----------------------------------------------------|
-| `runIds` | Liste (UUIDs)   | Nein    | Run-IDs fuer den Report. Leer oder ohne Body = alle  |
+| `runIds` | Liste (UUIDs)   | Nein    | Run-IDs für den Report. Leer oder ohne Body = alle  |
 
 **Beispiel - Alle Runs kombinieren:**
 ```bash
@@ -518,19 +518,19 @@ curl -X POST http://localhost:8080/api/v1/test/combined-report/generate \
 ```
 
 **Hinweise:**
-- Ohne Request-Body oder mit leerer `runIds`-Liste werden alle verfuegbaren Runs kombiniert
+- Ohne Request-Body oder mit leerer `runIds`-Liste werden alle verfügbaren Runs kombiniert
 - **Voraussetzung:** Allure CLI muss auf dem Server installiert sein
-- Der Report ist sofort unter der zurueckgegebenen URL im Browser aufrufbar
-- Bei erneuter Generierung wird der vorherige kombinierte Report ueberschrieben
-- Nuetzlich fuer Sprint-Reports oder teamuebergreifende Auswertungen
+- Der Report ist sofort unter der zurückgegebenen URL im Browser aufrufbar
+- Bei erneuter Generierung wird der vorherige kombinierte Report überschrieben
+- Nützlich für Sprint-Reports oder teamübergreifende Auswertungen
 - Im Report werden die einzelnen Runs als Suites gruppiert, z.B. `Run a76c4874 @Backend, @smoke` - so ist sofort erkennbar, welche Tags bei welchem Lauf verwendet wurden
-- Jeder Testfall erscheint pro Run einzeln (keine Deduplizierung), sodass alle Ausfuehrungen sichtbar sind
+- Jeder Testfall erscheint pro Run einzeln (keine Deduplizierung), sodass alle Ausführungen sichtbar sind
 
 **Fehler:**
 
 | Code | Bedeutung                                      |
 |------|-------------------------------------------------|
-| 404  | Keine Runs gefunden oder Allure CLI nicht verfuegbar |
+| 404  | Keine Runs gefunden oder Allure CLI nicht verfügbar |
 | 500  | Fehler bei Report-Generierung                  |
 
 ---
@@ -550,13 +550,13 @@ curl -X POST http://localhost:8080/api/v1/test/combined-report/generate \
 4. Allure-Report generieren  POST /api/v1/test/report/abc-123-/generate
        |
        v
-5. Report-URL oeffnen        Browser: http://localhost:8080/reports/abc-123-.../allure-report/index.html
+5. Report-URL öffnen        Browser: http://localhost:8080/reports/abc-123-.../allure-report/index.html
        |
        v
-6. Optional: Aufraeumen      DELETE /api/v1/test/abc-123-...
+6. Optional: Aufräumen      DELETE /api/v1/test/abc-123-...
 ```
 
-**Vollstaendiges Beispiel mit curl:**
+**Vollständiges Beispiel mit curl:**
 
 ```bash
 # 1. Test starten
@@ -582,17 +582,17 @@ done
 REPORT_URL=$(curl -s -X POST http://localhost:8080/api/v1/test/report/$RUN_ID/generate \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['reportUrl'])")
 
-echo "Allure-Report verfuegbar unter: $REPORT_URL"
+echo "Allure-Report verfügbar unter: $REPORT_URL"
 
 # 4. Optional: JSON-Report herunterladen
 curl -s http://localhost:8080/api/v1/test/report/$RUN_ID > report.json
 echo "JSON-Report gespeichert: report.json"
 ```
 
-### Kombinierter Report ueber mehrere Runs
+### Kombinierter Report über mehrere Runs
 
 ```bash
-# 1. Verfuegbare Runs auflisten
+# 1. Verfügbare Runs auflisten
 curl -s http://localhost:8080/api/v1/test/runs
 # --> ["550e8400-...", "660f9511-..."]
 
@@ -604,15 +604,15 @@ curl -s -X POST http://localhost:8080/api/v1/test/combined-report/generate \
   -H "Content-Type: application/json" \
   -d '{"runIds": ["550e8400-...", "660f9511-..."]}'
 
-# 3. Report im Browser oeffnen
+# 3. Report im Browser öffnen
 # --> http://localhost:8080/reports/combined/allure-report/index.html
 ```
 
 ---
 
-## Parallele Ausfuehrung (mehrere Teams)
+## Parallele Ausführung (mehrere Teams)
 
-Der Dienst unterstuetzt bis zu **5 gleichzeitige Test-Laeufe**. Jeder Lauf erhaelt eine eigene Run-ID und isolierte Ergebnis-Verzeichnisse, sodass sich parallele Ausfuehrungen nicht gegenseitig beeinflussen.
+Der Dienst unterstützt bis zu **5 gleichzeitige Test-Läufe**. Jeder Lauf erhält eine eigene Run-ID und isolierte Ergebnis-Verzeichnisse, sodass sich parallele Ausführungen nicht gegenseitig beeinflussen.
 
 **Beispiel: Team A und Team B starten gleichzeitig Tests:**
 
@@ -636,16 +636,16 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   }'
 ```
 
-Falls alle 5 Slots belegt sind, werden weitere Anfragen in eine Warteschlange gestellt und automatisch ausgefuehrt, sobald ein Slot frei wird.
+Falls alle 5 Slots belegt sind, werden weitere Anfragen in eine Warteschlange gestellt und automatisch ausgeführt, sobald ein Slot frei wird.
 
 ---
 
-## Verfuegbare Test-Tags
+## Verfügbare Test-Tags
 
 | Tag           | Beschreibung                          |
 |---------------|---------------------------------------|
 | `@smoke`      | Schnelle Smoke Tests                  |
-| `@regression` | Vollstaendige Regressionstests        |
+| `@regression` | Vollständige Regressionstests        |
 | `@End2End`    | End-to-End UI-Tests                   |
 | `@API-Test`   | API-Tests                             |
 | `@T-3511`     | Einzelner Testfall (nach ID)          |
@@ -653,7 +653,7 @@ Falls alle 5 Slots belegt sind, werden weitere Anfragen in eine Warteschlange ge
 | `@T-3513`     | Einzelner Testfall (nach ID)          |
 | `@T-3514`     | Einzelner Testfall (nach ID)          |
 
-Tags koennen kombiniert werden:
+Tags können kombiniert werden:
 ```json
 {
   "tags": ["@smoke", "@API-Test"]
@@ -664,16 +664,16 @@ Tags koennen kombiniert werden:
 
 ## Fehlerbehebung
 
-| Problem                                    | Loesung                                                        |
+| Problem                                    | Lösung                                                        |
 |--------------------------------------------|----------------------------------------------------------------|
-| `400 Bad Request`                          | Request-Body pruefen: `environment` und `tags` sind Pflicht    |
-| `404 Not Found`                            | Run-ID pruefen - ist sie korrekt?                              |
+| `400 Bad Request`                          | Request-Body prüfen: `environment` und `tags` sind Pflicht    |
+| `404 Not Found`                            | Run-ID prüfen - ist sie korrekt?                              |
 | `429 Too Many Requests`                    | Warten bis laufende Tests abgeschlossen sind                   |
-| Status bleibt auf `QUEUED`                 | Alle 5 Slots belegt - mit `GET /active` aktive Tests pruefen   |
+| Status bleibt auf `QUEUED`                 | Alle 5 Slots belegt - mit `GET /active` aktive Tests prüfen   |
 | Report leer oder nicht vorhanden           | Test muss erst abgeschlossen sein (Status: COMPLETED/FAILED)   |
-| UI-Tests schlagen fehl                     | Browser pruefen (`chromium` ist Standard im Container)         |
+| UI-Tests schlagen fehl                     | Browser prüfen (`chromium` ist Standard im Container)         |
 | Keine Screenshots im Allure-Report         | Screenshots werden nur bei UI-Tests (`@End2End`, `@smoke`) erstellt, nicht bei `@API-Test` |
-| Kein Barrierefreiheitsbericht im Report    | Axe-Scan wird nur bei UI-Tests ausgefuehrt; Report unter `/reports/{runId}/axe-result/index.html` pruefen |
+| Kein Barrierefreiheitsbericht im Report    | Axe-Scan wird nur bei UI-Tests ausgeführt; Report unter `/reports/{runId}/axe-result/index.html` prüfen |
 
 **Monitoring-Endpoints:**
 

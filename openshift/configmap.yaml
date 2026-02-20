@@ -8,7 +8,7 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: "prod"
   TEST_RESULTS_PATH: "/app/test-results"
-  PLAYWRIGHT_BROWSERS_PATH: "/app/browsers"
+  PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright"
   CUCUMBER_PARALLEL_THREADS: "4"
   # Override these per environment:
   BASE_URL: "https://your-application-under-test.example.com"

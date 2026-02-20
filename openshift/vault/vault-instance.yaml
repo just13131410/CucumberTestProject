@@ -1,0 +1,50 @@
+apiVersion: vault.banzaicloud.com/v1alpha1
+kind: Vault
+metadata:
+  name: vault
+  namespace: test-automation
+spec:
+  size: 1
+  image: hashicorp/vault:1.17
+  serviceAccount: vault
+  serviceType: ClusterIP
+  ingress:
+    annotations: {}
+    spec: {}
+  # Vault configuration
+  config:
+    storage:
+      file:
+        path: /vault/file
+    listener:
+      tcp:
+        address: "0.0.0.0:8200"
+        tls_disable: true
+    api_addr: "http://vault.test-automation.svc:8200"
+    ui: true
+  # Unsealing: auto-unseal via Kubernetes secrets (for local/CRC use)
+  unsealConfig:
+    kubernetes:
+      secretNamespace: test-automation
+  # Enable KV secrets engine v2
+  externalConfig:
+    policies:
+      - name: cucumber-test
+        rules: |
+          path "secret/data/cucumber-test" {
+            capabilities = ["read"]
+          }
+    auth:
+      - type: kubernetes
+        roles:
+          - name: cucumber-test
+            bound_service_account_names: ["default", "cucumber-test-service"]
+            bound_service_account_namespaces: ["test-automation"]
+            policies: ["cucumber-test"]
+            ttl: 1h
+    secrets:
+      - path: secret
+        type: kv
+        description: KV Secrets Engine v2
+        options:
+          version: "2"

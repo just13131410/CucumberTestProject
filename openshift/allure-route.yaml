@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: allure-report
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  path: /reports/combined/allure-report
+  to:
+    kind: Service
+    name: cucumber-test-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

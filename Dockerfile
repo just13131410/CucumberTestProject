@@ -16,17 +16,17 @@ RUN mvn test -B
 RUN mvn package -DskipTests -B
 
 # ============================================================
-# Stage 2: Runtime with Playwright + Chromium
+# Stage 2: Runtime with Playwright + Chrome
 # ============================================================
-# Gleicher openjdk-21 wie Stage 1 (kein ubi-minimal nötig, Java bereits enthalten)
 FROM registry.access.redhat.com/ubi9/openjdk-21:1.18
 
 USER root
 
-# Chrome RPM aus Artifactory installieren (kein package repository benötigt)
-# Übergabe per Build-Arg: docker build --build-arg CHROME_RPM_URL=https://artifactory.../chrome.rpm
+# Chrome RPM aus Artifactory installieren
+
 ARG CHROME_RPM_URL
-RUN curl -L "${CHROME_RPM_URL}" -o /tmp/chrome.rpm && \
+RUN test -n "${CHROME_RPM_URL}" || { echo "ERROR: --build-arg CHROME_RPM_URL ist nicht gesetzt"; exit 1; } && \
+    curl -L "${CHROME_RPM_URL}" -o /tmp/chrome.rpm && \
     rpm -ivh --nodeps /tmp/chrome.rpm && \
     rm /tmp/chrome.rpm
 
@@ -60,7 +60,7 @@ ENV TEST_RESULTS_PATH=/app/test-results
 
 # Browser aus dem Artifactory (z.B. per RPM installiert, kein Playwright-eigener Download)
 # Spring Relaxed Binding: BROWSER_EXECUTABLE_PATH → browser.executable.path
-# Pfad auf den tatsächlichen Installationspfad des Browsers aus dem Artifactory anpassen.
+# Pfad anpassen falls die RPM einen anderen Installationspfad verwendet
 ENV BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

@@ -38,6 +38,12 @@ public abstract class BasePage {
             options.setExecutablePath(Path.of(executablePath));
         }
 
+        // Zusätzliche Args aus browser.extra.args (z.B. --no-zygote für OpenShift seccomp).
+        java.util.List<String> extraArgs = BrowserConfig.getExtraArgs();
+        if (!extraArgs.isEmpty()) {
+            options.setArgs(extraArgs);
+        }
+
         browser = browserType.launch(options);
         page = browser.newPage();
         return page;

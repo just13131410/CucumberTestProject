@@ -144,6 +144,13 @@
       <version>${rest-assured.version}</version>
     </dependency>
 
+    <!-- PDFBox (PDF/A-Validierung in Cucumber-Tests) -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>2.0.32</version>
+    </dependency>
+
     <!-- Allure Reporting -->
     <dependency>
       <groupId>io.qameta.allure</groupId>
@@ -533,6 +540,10 @@
             <groupId>com.google.cloud.tools</groupId>
             <artifactId>jib-maven-plugin</artifactId>
             <configuration>
+              <from>
+                <!-- Playwright Java image: Chromium/Firefox/WebKit bereits installiert -->
+                <image>mcr.microsoft.com/playwright/java:v1.58.0-noble</image>
+              </from>
               <to>
                 <image>default-route-openshift-image-registry.apps-crc.testing/test-automation/cucumber-test-service:latest</image>
               </to>

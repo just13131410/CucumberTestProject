@@ -155,6 +155,19 @@
       <artifactId>allure-rest-assured</artifactId>
       <version>${allure.version}</version>
     </dependency>
+    <!-- Allure HTML-Report Generator (ersetzt Allure CLI - kein subprocess mehr nötig) -->
+    <dependency>
+      <groupId>io.qameta.allure</groupId>
+      <artifactId>allure-generator</artifactId>
+      <version>${allure.version}</version>
+      <exclusions>
+        <!-- Spring Boot verwaltet slf4j bereits -->
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-simple</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
 
     <!-- Utilities -->
     <dependency>

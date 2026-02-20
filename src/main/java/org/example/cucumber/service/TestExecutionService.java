@@ -1,5 +1,7 @@
 package org.example.cucumber.service;
 
+import io.qameta.allure.ConfigurationBuilder;
+import io.qameta.allure.ReportGenerator;
 import org.example.CucumberRunnerService;
 import org.example.cucumber.context.TestContext;
 import org.example.cucumber.model.TestExecutionRequest;
@@ -172,123 +174,40 @@ public class TestExecutionService {
     }
 
     public Optional<String> generateAllureReport(UUID runId) {
+        Path allureResultsDir = getResultsPath(runId).resolve("allure-results");
+        Path allureReportDir = getResultsPath(runId).resolve("allure-report");
+
+        if (!Files.exists(allureResultsDir)) {
+            log.warn("Allure results directory not found for runId: {}", runId);
+            return Optional.empty();
+        }
+
         try {
-            Path allureResultsDir = getResultsPath(runId).resolve("allure-results");
-            Path allureReportDir = getResultsPath(runId).resolve("allure-report");
-
-            if (!Files.exists(allureResultsDir)) {
-                log.warn("Allure results directory not found for runId: {}", runId);
-                return Optional.empty();
-            }
-
-            // Create report directory if it doesn't exist
             Files.createDirectories(allureReportDir);
-
-            // Check if Allure CLI is available
-            String[] allureCommand = isAllureAvailable();
-            if (allureCommand == null) {
-                log.warn("Allure CLI not found. Please install Allure CLI or add it to the Docker image. Skipping report generation for runId: {}", runId);
-                return Optional.empty();
-            }
-
             // Copy history from previous report (enables trends)
             copyHistory(allureReportDir, allureResultsDir);
 
-            // Generate Allure report using command line
-            List<String> command = new ArrayList<>(List.of(allureCommand));
-            command.addAll(List.of("generate",
-                allureResultsDir.toString(),
-                "-o", allureReportDir.toString(),
-                "--clean"));
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.redirectErrorStream(true);
+            generateWithJavaApi(allureReportDir, List.of(allureResultsDir));
 
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-
-            if (exitCode == 0) {
-                // Verify index.html was created
-                Path indexHtml = allureReportDir.resolve("index.html");
-                if (Files.exists(indexHtml)) {
-                    String reportUrl = "/reports/" + runId + "/allure-report/index.html";
-                    log.info("Allure report generated successfully for runId: {} at file: {}, URL: {}",
-                            runId, indexHtml.toAbsolutePath(), reportUrl);
-                    return Optional.of(reportUrl);
-                } else {
-                    log.error("Allure command succeeded but index.html not found at: {}", indexHtml.toAbsolutePath());
-                    return Optional.empty();
-                }
+            Path indexHtml = allureReportDir.resolve("index.html");
+            if (Files.exists(indexHtml)) {
+                String reportUrl = "/reports/" + runId + "/allure-report/index.html";
+                log.info("Allure report generated successfully for runId: {}", runId);
+                return Optional.of(reportUrl);
             } else {
-                log.error("Failed to generate Allure report for runId: {}, exit code: {}", runId, exitCode);
+                log.error("Report generation completed but index.html not found at: {}", indexHtml.toAbsolutePath());
                 return Optional.empty();
             }
-
         } catch (IOException e) {
             log.error("Error generating Allure report for runId: {}", runId, e);
             return Optional.empty();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Interrupted while generating Allure report for runId: {}", runId, e);
-            return Optional.empty();
         }
     }
 
-    private String[] isAllureAvailable() {
-        // Try direct commands first (works on Linux, macOS, and Windows with allure in PATH)
-        String[] directCommands = {"allure", "allure.bat", "allure.cmd"};
-        for (String cmd : directCommands) {
-            try {
-                ProcessBuilder pb = new ProcessBuilder(cmd, "--version");
-                pb.redirectErrorStream(true);
-                Process process = pb.start();
-                int exitCode = process.waitFor();
-                if (exitCode == 0) {
-                    return new String[]{cmd};
-                }
-            } catch (IOException | InterruptedException e) {
-                // Command not found or failed, try next
-            }
-        }
-
-        // Fallback: find Allure installation and run via java -cp (works on all platforms)
-        Path allureHome = findAllureHome();
-        if (allureHome != null) {
-            Path libDir = allureHome.resolve("lib");
-            String classpath = libDir + java.io.File.separator + "*"
-                    + java.io.File.pathSeparator + libDir.resolve("config");
-            try {
-                ProcessBuilder pb = new ProcessBuilder("java", "-cp", classpath,
-                        "io.qameta.allure.CommandLine", "--version");
-                pb.redirectErrorStream(true);
-                Process process = pb.start();
-                int exitCode = process.waitFor();
-                if (exitCode == 0) {
-                    log.info("Found Allure CLI via java -cp at: {}", allureHome);
-                    return new String[]{"java", "-cp", classpath, "io.qameta.allure.CommandLine"};
-                }
-            } catch (IOException | InterruptedException e) {
-                // java not available, skip
-            }
-        }
-
-        return null;
-    }
-
-    private Path findAllureHome() {
-        // Check Scoop installation (Windows)
-        String userHome = System.getProperty("user.home");
-        if (userHome != null) {
-            Path scoopAllure = Path.of(userHome, "scoop", "apps", "allure", "current");
-            if (Files.exists(scoopAllure.resolve("lib"))) {
-                return scoopAllure;
-            }
-        }
-        // Check ALLURE_HOME environment variable
-        String allureHome = System.getenv("ALLURE_HOME");
-        if (allureHome != null && Files.exists(Path.of(allureHome, "lib"))) {
-            return Path.of(allureHome);
-        }
-        return null;
+    private void generateWithJavaApi(Path outputDir, List<Path> resultDirs) throws IOException {
+        var config = new ConfigurationBuilder().useDefault().build();
+        ReportGenerator generator = new ReportGenerator(config);
+        generator.generate(outputDir, resultDirs);
     }
 
     public Optional<String> getReportUrl(UUID runId) {
@@ -401,12 +320,6 @@ public class TestExecutionService {
             return Optional.empty();
         }
 
-        String[] allureCommand = isAllureAvailable();
-        if (allureCommand == null) {
-            log.warn("Allure CLI not found. Cannot generate combined report.");
-            return Optional.empty();
-        }
-
         Path tempDir = null;
         try {
             Path combinedReportDir = getBaseResultsPath().resolve("combined").resolve("allure-report");
@@ -434,43 +347,25 @@ public class TestExecutionService {
             UUID newestId = sortedRuns.getLast().id();
             copyHistory(combinedReportDir, tempDir.resolve(newestId.toString()));
 
-            // Build allure generate command with runs in ascending time order
-            List<String> command = new ArrayList<>(List.of(allureCommand));
-            command.add("generate");
-            for (RunEntry run : sortedRuns) {
-                command.add(tempDir.resolve(run.id().toString()).toString());
-            }
-            command.add("-o");
-            command.add(combinedReportDir.toString());
-            command.add("--clean");
+            // Generate report via Java API (kein CLI-Subprocess nötig)
+            final Path resolvedTempDir = tempDir;
+            List<Path> resultDirs = sortedRuns.stream()
+                    .map(run -> resolvedTempDir.resolve(run.id().toString()))
+                    .collect(Collectors.toList());
+            generateWithJavaApi(combinedReportDir, resultDirs);
 
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.redirectErrorStream(true);
-
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-
-            if (exitCode == 0) {
-                Path indexHtml = combinedReportDir.resolve("index.html");
-                if (Files.exists(indexHtml)) {
-                    String reportUrl = "/reports/combined/allure-report/index.html";
-                    log.info("Combined Allure report generated successfully from {} runs at URL: {}",
-                            validRunIds.size(), reportUrl);
-                    return Optional.of(reportUrl);
-                } else {
-                    log.error("Allure command succeeded but index.html not found at: {}", indexHtml.toAbsolutePath());
-                    return Optional.empty();
-                }
+            Path indexHtml = combinedReportDir.resolve("index.html");
+            if (Files.exists(indexHtml)) {
+                String reportUrl = "/reports/combined/allure-report/index.html";
+                log.info("Combined Allure report generated successfully from {} runs at URL: {}",
+                        validRunIds.size(), reportUrl);
+                return Optional.of(reportUrl);
             } else {
-                log.error("Failed to generate combined Allure report, exit code: {}", exitCode);
+                log.error("Combined report generation completed but index.html not found at: {}", indexHtml.toAbsolutePath());
                 return Optional.empty();
             }
         } catch (IOException e) {
             log.error("Error generating combined Allure report", e);
-            return Optional.empty();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Interrupted while generating combined Allure report", e);
             return Optional.empty();
         } finally {
             // Clean up temp directory

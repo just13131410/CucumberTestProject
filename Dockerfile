@@ -15,15 +15,6 @@ COPY src ./src
 RUN mvn test -B
 RUN mvn package -DskipTests -B
 
-# Download and unpack Allure CLI from Maven Central (kein GitHub-Zugriff nötig)
-ARG ALLURE_VERSION=2.32.0
-RUN mvn org.apache.maven.plugins:maven-dependency-plugin:3.6.1:unpack \
-    -Dartifact=io.qameta.allure:allure-commandline:${ALLURE_VERSION}:zip \
-    -DoutputDirectory=/tmp/allure-unpack -B && \
-    mv /tmp/allure-unpack/allure-${ALLURE_VERSION} /opt/allure && \
-    chmod +x /opt/allure/bin/allure && \
-    rm -rf /tmp/allure-unpack
-
 # ============================================================
 # Stage 2: Runtime with Playwright + Chromium
 # ============================================================
@@ -49,15 +40,6 @@ RUN microdnf install -y \
     fontconfig \
     freetype \
     && microdnf clean all
-
-# Allure CLI aus dem Builder-Stage kopieren (kein Download zur Laufzeit)
-ARG ALLURE_VERSION=2.32.0
-COPY --from=builder /opt/allure /opt/allure
-RUN chown -R 1001:0 /opt/allure && \
-    chmod -R g=u /opt/allure
-
-ENV ALLURE_HOME=/opt/allure
-ENV PATH="$PATH:/opt/allure/bin"
 
 WORKDIR /app
 

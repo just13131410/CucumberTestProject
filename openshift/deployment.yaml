@@ -14,12 +14,27 @@ spec:
     metadata:
       labels:
         app: cucumber-test-service
+      annotations:
+        # Vault Agent Injector – injects secrets from Vault as environment variables.
+        # Requires the Vault Operator and the cucumber-test Kubernetes auth role.
+        # Remove these annotations if Vault is not used (e.g. use secret.yaml instead).
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "cucumber-test"
+        vault.hashicorp.com/agent-inject-secret-credentials: "secret/cucumber-test"
+        # Render the Vault secret as shell-sourceable env-var exports
+        vault.hashicorp.com/agent-inject-template-credentials: |
+          {{- with secret "secret/data/cucumber-test" -}}
+          export ZEPHYR_API_TOKEN="{{ .Data.data.ZEPHYR_API_TOKEN }}"
+          export JIRA_API_TOKEN="{{ .Data.data.JIRA_API_TOKEN }}"
+          {{- end }}
     spec:
       securityContext:
         runAsNonRoot: true
         # OpenShift assigns arbitrary UID; do not hardcode runAsUser
       containers:
         - name: cucumber-test-service
+          # CRC (local): default-route-openshift-image-registry.apps-crc.testing/test-automation/cucumber-test-service:latest
+          # Production OpenShift: image-registry.openshift-image-registry.svc:5000/test-automation/cucumber-test-service:latest
           image: image-registry.openshift-image-registry.svc:5000/test-automation/cucumber-test-service:latest
           ports:
             - name: http
@@ -31,6 +46,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: cucumber-test-config
+            # secretRef is used when Vault is NOT available.
+            # When Vault is active, remove this block – secrets are injected via the Vault Agent sidecar.
             - secretRef:
                 name: cucumber-test-secrets
           resources:

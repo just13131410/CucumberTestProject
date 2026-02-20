@@ -16,17 +16,25 @@ RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
 COPY src ./src
 RUN ./mvnw package -DskipTests -B
 
+# Download and unpack Allure CLI from Maven Central (kein GitHub-Zugriff nötig)
+ARG ALLURE_VERSION=2.32.0
+RUN ./mvnw org.apache.maven.plugins:maven-dependency-plugin:3.6.1:unpack \
+    -Dartifact=io.qameta.allure:allure-commandline:${ALLURE_VERSION}:zip \
+    -DoutputDirectory=/tmp/allure-unpack -B && \
+    mv /tmp/allure-unpack/allure-${ALLURE_VERSION} /opt/allure && \
+    chmod +x /opt/allure/bin/allure && \
+    rm -rf /tmp/allure-unpack
+
 # ============================================================
 # Stage 2: Runtime with Playwright + Chromium
 # ============================================================
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.3
+# Gleicher openjdk-21 wie Stage 1 (kein ubi-minimal nötig, Java bereits enthalten)
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.18
 
 USER root
 
-# Install JRE 21, Chromium system dependencies, and tools for Allure CLI
+# Chromium-Abhängigkeiten installieren (Java ist im Image bereits enthalten)
 RUN microdnf install -y \
-    java-21-openjdk-headless \
-    # Chromium dependencies
     nss \
     atk \
     at-spi2-atk \
@@ -39,21 +47,15 @@ RUN microdnf install -y \
     pango \
     alsa-lib \
     gtk3 \
-    wget \
-    tar \
     fontconfig \
     freetype \
     && microdnf clean all
 
-# Install Allure CLI (version must match allure.version in pom.xml)
+# Allure CLI aus dem Builder-Stage kopieren (kein Download zur Laufzeit)
 ARG ALLURE_VERSION=2.32.0
-RUN wget -q "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz" \
-    -O /tmp/allure.tgz \
-    && tar -xzf /tmp/allure.tgz -C /opt \
-    && mv /opt/allure-${ALLURE_VERSION} /opt/allure \
-    && rm /tmp/allure.tgz \
-    && chown -R 1001:0 /opt/allure \
-    && chmod -R g=u /opt/allure
+COPY --from=builder /opt/allure /opt/allure
+RUN chown -R 1001:0 /opt/allure && \
+    chmod -R g=u /opt/allure
 
 ENV ALLURE_HOME=/opt/allure
 ENV PATH="$PATH:/opt/allure/bin"

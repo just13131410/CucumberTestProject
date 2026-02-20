@@ -511,6 +511,25 @@
       </build>
     </profile>
 
+    <!-- Profile für lokales CRC-Deployment via Jib (kein Docker erforderlich) -->
+    <profile>
+      <id>crc</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.google.cloud.tools</groupId>
+            <artifactId>jib-maven-plugin</artifactId>
+            <configuration>
+              <to>
+                <image>default-route-openshift-image-registry.apps-crc.testing/test-automation/cucumber-test-service:latest</image>
+              </to>
+              <allowInsecureRegistries>true</allowInsecureRegistries>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
     <!-- Profile für Regression Tests -->
     <profile>
       <id>regression</id>

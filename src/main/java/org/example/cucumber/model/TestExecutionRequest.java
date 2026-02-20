@@ -52,6 +52,12 @@ public class TestExecutionRequest {
             example = "chrome")
     private String browser;
 
+    @Schema(description = "Browser im Headless-Modus starten (kein sichtbares Fenster)",
+            example = "true",
+            defaultValue = "true")
+    @Builder.Default
+    private Boolean headless = true;
+
     @Schema(description = "Benutzerdefinierte Umgebungsvariablen")
     private Map<String, String> environmentVariables;
 

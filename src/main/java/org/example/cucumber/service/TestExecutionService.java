@@ -102,6 +102,9 @@ public class TestExecutionService {
             if (request.getBrowser() != null) {
                 System.setProperty("browser", request.getBrowser());
             }
+            if (request.getHeadless() != null) {
+                System.setProperty("browser.headless", request.getHeadless().toString());
+            }
 
             CucumberRunnerService.RunResult result = cucumberRunnerService.run(
                     runId.toString(), tags, features);

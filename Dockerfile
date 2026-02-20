@@ -58,8 +58,9 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV TEST_RESULTS_PATH=/app/test-results
 
-# Playwright nutzt den systemseitig installierten Chrome (kein eigener Download)
-# Pfad anpassen falls die RPM einen anderen Installationspfad verwendet
-ENV CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# Browser aus dem Artifactory (z.B. per RPM installiert, kein Playwright-eigener Download)
+# Spring Relaxed Binding: BROWSER_EXECUTABLE_PATH → browser.executable.path
+# Pfad auf den tatsächlichen Installationspfad des Browsers aus dem Artifactory anpassen.
+ENV BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

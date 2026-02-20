@@ -4,6 +4,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import org.example.config.BrowserConfig;
 
 import java.nio.file.Path;
 
@@ -25,14 +26,14 @@ public abstract class BasePage {
             );
         };
 
-        BrowserType.LaunchOptions options = new BrowserType.LaunchOptions().setHeadless(true);
+        boolean headless = !"false".equalsIgnoreCase(System.getProperty("browser.headless", "true"));
+        BrowserType.LaunchOptions options = new BrowserType.LaunchOptions().setHeadless(headless);
 
-        // Nutze systemseitig installierten Chrome falls CHROME_EXECUTABLE_PATH gesetzt ist
-        // (z.B. per RPM aus Artifactory installiert, kein Playwright-eigener Chromium-Download nötig)
-        String executablePath = System.getenv("CHROME_EXECUTABLE_PATH");
-        if (executablePath == null) {
-            executablePath = System.getProperty("chrome.executable.path");
-        }
+        // Dev:  application-dev.properties → browser.executable.path = lokaler Browser-Pfad
+        // Prod: BROWSER_EXECUTABLE_PATH Env-Var (OpenShift) → aus Artifactory installierter Browser
+        //       Spring Relaxed Binding übersetzt die Env-Var automatisch auf browser.executable.path.
+        // Leer → Playwright nutzt seinen eingebetteten Browser (kein externer Pfad nötig).
+        String executablePath = BrowserConfig.getExecutablePath();
         if (executablePath != null && !executablePath.isBlank()) {
             options.setExecutablePath(Path.of(executablePath));
         }

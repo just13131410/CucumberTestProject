@@ -119,6 +119,7 @@ class TestExecutionRequestTest {
         assertEquals(2, request.getMaxRetries());
         assertEquals(30, request.getTimeoutMinutes());
         assertEquals("NORMAL", request.getPriority());
+        assertTrue(request.getHeadless());
     }
 
     @Test

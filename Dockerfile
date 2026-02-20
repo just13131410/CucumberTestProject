@@ -6,19 +6,18 @@ FROM registry.access.redhat.com/ubi9/openjdk-21:1.18 AS builder
 USER root
 WORKDIR /build
 
-# Copy Maven wrapper and pom first for dependency caching
+# Copy pom first for dependency caching (kein Maven Wrapper nötig - mvn ist im Image enthalten)
 COPY pom.xml .
-COPY .mvn .mvn
-COPY mvnw .
-RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
+RUN mvn dependency:go-offline -B
 
 # Copy source and build (skip tests - they run at runtime)
 COPY src ./src
-RUN ./mvnw package -DskipTests -B
+RUN mvn test -B
+RUN mvn package -DskipTests -B
 
 # Download and unpack Allure CLI from Maven Central (kein GitHub-Zugriff nötig)
 ARG ALLURE_VERSION=2.32.0
-RUN ./mvnw org.apache.maven.plugins:maven-dependency-plugin:3.6.1:unpack \
+RUN mvn org.apache.maven.plugins:maven-dependency-plugin:3.6.1:unpack \
     -Dartifact=io.qameta.allure:allure-commandline:${ALLURE_VERSION}:zip \
     -DoutputDirectory=/tmp/allure-unpack -B && \
     mv /tmp/allure-unpack/allure-${ALLURE_VERSION} /opt/allure && \

@@ -23,41 +23,24 @@ FROM registry.access.redhat.com/ubi9/openjdk-21:1.18
 
 USER root
 
-# Chromium-Abhängigkeiten installieren (Java ist im Image bereits enthalten)
-RUN microdnf install -y \
-    nss \
-    atk \
-    at-spi2-atk \
-    cups-libs \
-    libdrm \
-    libXcomposite \
-    libXdamage \
-    libXrandr \
-    mesa-libgbm \
-    pango \
-    alsa-lib \
-    gtk3 \
-    fontconfig \
-    freetype \
-    && microdnf clean all
+# Chrome RPM aus Artifactory installieren (kein package repository benötigt)
+# Übergabe per Build-Arg: docker build --build-arg CHROME_RPM_URL=https://artifactory.../chrome.rpm
+ARG CHROME_RPM_URL
+RUN curl -L "${CHROME_RPM_URL}" -o /tmp/chrome.rpm && \
+    rpm -ivh --nodeps /tmp/chrome.rpm && \
+    rm /tmp/chrome.rpm
 
 WORKDIR /app
 
 # Copy the built JAR
 COPY --from=builder /build/target/*.jar app.jar
 
-# Set Playwright browser path
-ENV PLAYWRIGHT_BROWSERS_PATH=/app/browsers
-
 # Create directories and set permissions for OpenShift (arbitrary UID, GID 0)
-RUN mkdir -p /app/browsers /app/test-results && \
+RUN mkdir -p /app/test-results && \
     chown -R 1001:0 /app && \
     chmod -R g=u /app
 
-# Install Playwright Chromium at build time
 USER 1001
-RUN java -cp app.jar com.microsoft.playwright.CLI install chromium || \
-    echo "Playwright browser install completed (or skipped if unavailable)"
 
 # Expose application and actuator ports
 EXPOSE 8080 8081
@@ -74,5 +57,9 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
 
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV TEST_RESULTS_PATH=/app/test-results
+
+# Playwright nutzt den systemseitig installierten Chrome (kein eigener Download)
+# Pfad anpassen falls die RPM einen anderen Installationspfad verwendet
+ENV CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

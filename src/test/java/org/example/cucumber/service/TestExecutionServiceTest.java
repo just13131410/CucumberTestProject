@@ -542,4 +542,159 @@ class TestExecutionServiceTest {
         String tags = readTagsFromExecutorJson(tempDir);
         assertEquals("", tags);
     }
+
+    // --- reportUrls: accessibility nur für Frontend-Tests ---
+
+    @Test
+    void execution_BackendOnlyTags_NoAccessibilityUrl() throws Exception {
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                .thenReturn(new CucumberRunnerService.RunResult("id", "@Backend", 0, "out"));
+
+        TestExecutionRequest request = createRequest("dev", List.of("@Backend"));
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+        UUID runId = response.getRunId();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
+            assertTrue(status.isPresent());
+            assertEquals("COMPLETED", status.get().getStatus());
+        });
+
+        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
+        assertFalse(urls.containsKey("accessibility"),
+                "Backend-only run must not contain an accessibility URL");
+    }
+
+    @Test
+    void execution_ApiTestOnlyTag_NoAccessibilityUrl() throws Exception {
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                .thenReturn(new CucumberRunnerService.RunResult("id", "@API-Test", 0, "out"));
+
+        TestExecutionRequest request = createRequest("dev", List.of("@API-Test"));
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+        UUID runId = response.getRunId();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
+                        .orElseThrow().getStatus()));
+
+        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
+        assertFalse(urls.containsKey("accessibility"));
+    }
+
+    @Test
+    void execution_BackendAndApiTestTags_NoAccessibilityUrl() throws Exception {
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                .thenReturn(new CucumberRunnerService.RunResult("id", "@Backend", 0, "out"));
+
+        TestExecutionRequest request = createRequest("dev", List.of("@Backend", "@API-Test"));
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+        UUID runId = response.getRunId();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
+                        .orElseThrow().getStatus()));
+
+        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
+        assertFalse(urls.containsKey("accessibility"));
+    }
+
+    @Test
+    void execution_FrontendTag_HasAccessibilityUrl() throws Exception {
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                .thenReturn(new CucumberRunnerService.RunResult("id", "@Frontend", 0, "out"));
+
+        TestExecutionRequest request = createRequest("dev", List.of("@Frontend"));
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+        UUID runId = response.getRunId();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
+                        .orElseThrow().getStatus()));
+
+        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
+        assertTrue(urls.containsKey("accessibility"));
+        assertTrue(urls.get("accessibility").contains("/axe-result/index.html"));
+    }
+
+    @Test
+    void execution_SmokeTestTag_HasAccessibilityUrl() throws Exception {
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                .thenReturn(new CucumberRunnerService.RunResult("id", "@SmokeTest", 0, "out"));
+
+        // @SmokeTest includes both UI and API tests → accessibility URL expected
+        TestExecutionRequest request = createRequest("dev", List.of("@SmokeTest"));
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+        UUID runId = response.getRunId();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
+                        .orElseThrow().getStatus()));
+
+        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
+        assertTrue(urls.containsKey("accessibility"));
+    }
+
+    // --- reportUrls: einheitliche /reports/** Pfade ---
+
+    @Test
+    void execution_CompletedRun_AllReportUrlsUseReportsPrefix() throws Exception {
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
+
+        TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+        UUID runId = response.getRunId();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
+                        .orElseThrow().getStatus()));
+
+        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
+
+        // Kein alter cucumber-json API-Pfad mehr
+        assertFalse(urls.containsKey("cucumber-json"),
+                "cucumber-json (API route) must not appear in reportUrls anymore");
+        // Kein allure-Eintrag mehr
+        assertFalse(urls.containsKey("allure"),
+                "allure URL must not appear in reportUrls anymore");
+
+        // cucumber-report zeigt auf direkten /reports/ Pfad
+        assertTrue(urls.containsKey("cucumber-report"),
+                "cucumber-report URL must be present");
+        String cucumberUrl = urls.get("cucumber-report");
+        assertTrue(cucumberUrl.startsWith("/reports/"),
+                "cucumber-report must start with /reports/ but was: " + cucumberUrl);
+        assertTrue(cucumberUrl.endsWith("Cucumber.html"),
+                "cucumber-report must point to Cucumber.html but was: " + cucumberUrl);
+
+        // accessibility zeigt auf direkten /reports/ Pfad (smoke enthält Frontend-Tests)
+        assertTrue(urls.containsKey("accessibility"));
+        String axeUrl = urls.get("accessibility");
+        assertTrue(axeUrl.startsWith("/reports/"),
+                "accessibility must start with /reports/ but was: " + axeUrl);
+        assertTrue(axeUrl.endsWith("/axe-result/index.html"),
+                "accessibility must end with /axe-result/index.html but was: " + axeUrl);
+    }
+
+    // --- duration als mm:ss ---
+
+    @Test
+    void execution_CompletedRun_DurationFormattedAsMinSec() throws Exception {
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
+
+        TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+        UUID runId = response.getRunId();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
+                        .orElseThrow().getStatus()));
+
+        String duration = testExecutionService.getTestStatus(runId).orElseThrow().getDuration();
+        assertNotNull(duration);
+        assertTrue(duration.matches("\\d{2}:\\d{2}"),
+                "Duration must be in mm:ss format but was: " + duration);
+    }
 }

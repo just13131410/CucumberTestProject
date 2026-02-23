@@ -1,4 +1,3 @@
-// java
 package org.example.steps;
 
 import io.cucumber.java.en.Given;
@@ -20,6 +19,8 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.InputStream;
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -34,7 +35,7 @@ public class ApiSteps {
 
     @Given("API Basis-URL ist gesetzt")
     public void setBaseUrl() {
-        this.baseUrl = ConfigReader.get("apiURL", "default-token");
+        this.baseUrl = ConfigReader.get("apiURL", "https://jsonplaceholder.typicode.com");
         Allure.step("Base URl gesetzt auf: " + this.baseUrl);
     }
 
@@ -60,11 +61,30 @@ public class ApiSteps {
         assertThat("JSON-Feld stimmt nicht", response.jsonPath().getInt(field), equalTo(expected));
     }
 
+    /**
+     * Lädt ein PDF entweder per HTTP (Prod: PDF_BASE_URL gesetzt) oder vom lokalen Dateisystem (Dev).
+     * Prod: GET ${pdf.base.url}/${fileName}  → z.B. https://.../reports/Response.pdf
+     * Dev:  new File(fileName)               → ./Response.pdf im Projektordner
+     */
+    private byte[] loadPdf(String fileName) throws Exception {
+        String baseUrl = ConfigReader.get("pdf.base.url", "");
+        if (baseUrl != null && !baseUrl.isBlank()) {
+            String url = baseUrl.replaceAll("/$", "") + "/" + fileName;
+            Allure.step("PDF per HTTP laden: " + url);
+            try (InputStream in = URI.create(url).toURL().openStream()) {
+                return in.readAllBytes();
+            }
+        } else {
+            Allure.step("PDF vom Dateisystem laden: " + new File(fileName).getAbsolutePath());
+            return java.nio.file.Files.readAllBytes(new File(fileName).toPath());
+        }
+    }
+
     @Then("die Datei {string} enthält die Felder der API-Antwort")
     public void verifyPdfContainsApiResponseFields(String fileName) throws Exception {
-        File pdfFile = new File(fileName);
+        byte[] pdfBytes = loadPdf(fileName);
 
-        try (PDDocument doc = PDDocument.load(pdfFile)) {
+        try (PDDocument doc = PDDocument.load(pdfBytes)) {
             String pdfText = new PDFTextStripper().getText(doc);
 
             // Extrahierten PDF-Text als Attachment anfügen
@@ -93,9 +113,9 @@ public class ApiSteps {
 
     @Then("das eingebettete XML in {string} stimmt mit der API-Antwort überein")
     public void verifyEmbeddedXmlMatchesApiResponse(String fileName) throws Exception {
-        File pdfFile = new File(fileName);
+        byte[] pdfBytes = loadPdf(fileName);
 
-        try (PDDocument doc = PDDocument.load(pdfFile)) {
+        try (PDDocument doc = PDDocument.load(pdfBytes)) {
             PDDocumentNameDictionary names = new PDDocumentNameDictionary(doc.getDocumentCatalog());
             PDEmbeddedFilesNameTreeNode efTree = names.getEmbeddedFiles();
             Map<String, PDComplexFileSpecification> embeddedFiles = efTree.getNames();

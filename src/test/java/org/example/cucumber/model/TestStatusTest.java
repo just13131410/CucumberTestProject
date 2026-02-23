@@ -1,5 +1,6 @@
 package org.example.cucumber.model;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
@@ -96,5 +97,51 @@ class TestStatusTest {
         assertNull(status.getEndTime());
         assertNull(status.getErrorMessage());
         assertNull(status.getReportUrls());
+    }
+
+    // --- duration field is String (mm:ss) ---
+
+    @Test
+    void duration_IsStoredAsString() {
+        TestStatus status = TestStatus.builder()
+                .duration("00:05")
+                .build();
+
+        assertEquals("00:05", status.getDuration());
+    }
+
+    @Test
+    void duration_NullByDefault() {
+        TestStatus status = TestStatus.builder().build();
+
+        assertNull(status.getDuration());
+    }
+
+    // --- successRate is excluded from JSON serialization ---
+
+    @Test
+    void successRate_NotIncludedInJson() throws Exception {
+        TestStatus status = TestStatus.builder()
+                .runId(UUID.randomUUID())
+                .status("COMPLETED")
+                .totalTests(10)
+                .passedTests(8)
+                .build();
+
+        String json = new ObjectMapper().writeValueAsString(status);
+
+        assertFalse(json.contains("successRate"),
+                "successRate must not appear in JSON response, but was found in: " + json);
+    }
+
+    @Test
+    void successRate_MethodStillAccessibleInJava() {
+        TestStatus status = TestStatus.builder()
+                .totalTests(10)
+                .passedTests(8)
+                .build();
+
+        // @JsonIgnore only affects serialization; the method must still work in Java
+        assertEquals(80.0, status.getSuccessRate());
     }
 }

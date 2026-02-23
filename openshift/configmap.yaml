@@ -13,6 +13,8 @@ data:
   # Override these per environment:
   BASE_URL: "https://your-application-under-test.example.com"
   API_URL: "https://your-api-under-test.example.com"
+  # PDF-Quelle für ApiSteps (HTTP-Basis-URL zum PVC-Verzeichnis auf OpenShift)
+  PDF_BASE_URL: "https://cucumber-test-service-test-automation.apps-crc.testing/reports"
   # Actuator on separate port
   MANAGEMENT_SERVER_PORT: "8081"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"

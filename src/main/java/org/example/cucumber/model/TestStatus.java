@@ -1,5 +1,6 @@
 package org.example.cucumber.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
@@ -7,7 +8,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
@@ -42,8 +42,8 @@ public class TestStatus {
     @Schema(description = "Endzeit")
     private LocalDateTime endTime;
 
-    @Schema(description = "Dauer")
-    private Duration duration;
+    @Schema(description = "Dauer (mm:ss)")
+    private String duration;
 
     @Schema(description = "Anzahl Tests gesamt")
     private Integer totalTests;
@@ -78,6 +78,7 @@ public class TestStatus {
     @Schema(description = "Metadata")
     private Map<String, Object> metadata;
 
+    @JsonIgnore
     public double getSuccessRate() {
         if (totalTests == null || totalTests == 0) {
             return 0.0;

@@ -189,13 +189,17 @@ public class TestExecutionController {
             produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Report-URL abrufen",
             description = "Ruft die URL zum Allure Report ab (falls bereits generiert)")
-    public ResponseEntity<String> getReportUrl(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "URL erfolgreich abgerufen"),
+            @ApiResponse(responseCode = "404", description = "Report noch nicht generiert")
+    })
+    public ResponseEntity<Map<String, String>> getReportUrl(
             @PathVariable("runId") UUID runId) {
 
         log.debug("Fetching report URL for runId: {}", runId);
 
         return testExecutionService.getReportUrl(runId)
-                .map(url -> ResponseEntity.ok("{\"url\": \"" + url + "\"}"))
+                .map(url -> ResponseEntity.ok(Map.of("reportUrl", url)))
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -270,7 +274,7 @@ public class TestExecutionController {
      * @param request Optionaler Request-Body mit Run-IDs
      * @return URL zum generierten kombinierten Report
      */
-    @PostMapping(value = "/combined-report/generate",
+    @PostMapping(value = "/report/combined/generate",
             produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Kombinierten Allure-Report generieren",
             description = "Generiert einen Allure-Report ueber mehrere Test-Runs. Ohne Body oder leere runIds = alle Runs.")

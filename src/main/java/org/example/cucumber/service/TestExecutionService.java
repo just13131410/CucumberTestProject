@@ -111,15 +111,25 @@ public class TestExecutionService {
 
             TestStatus status = statusMap.get(runId);
             status.setEndTime(LocalDateTime.now());
-            status.setDuration(Duration.between(status.getStartTime(), status.getEndTime()));
+            Duration elapsed = Duration.between(status.getStartTime(), status.getEndTime());
+            status.setDuration(String.format("%02d:%02d", elapsed.toMinutes(), elapsed.toSecondsPart()));
             status.setProgress(100);
             status.setCurrentPhase("COMPLETED");
 
-            // Build report URLs
+            // Build report URLs – einheitlich als /reports/** Direktpfade
             Map<String, String> reportUrls = new HashMap<>();
-            reportUrls.put("cucumber-json", "/api/v1/test/report/" + runId);
-            reportUrls.put("allure", "/api/v1/test/report/" + runId + "/url");
-            reportUrls.put("accessibility", "/reports/" + runId + "/axe-result/index.html");
+            reportUrls.put("cucumber-report", "/reports/" + runId + "/cucumber-reports/Cucumber.html");
+
+            // Accessibility report only for runs that include Frontend/UI tests
+            boolean isBackendOnly = request.getTags() != null && !request.getTags().isEmpty()
+                    && request.getTags().stream().allMatch(t -> {
+                        String tag = t.startsWith("@") ? t.substring(1) : t;
+                        return tag.equalsIgnoreCase("Backend") || tag.equalsIgnoreCase("API-Test");
+                    });
+            if (!isBackendOnly) {
+                reportUrls.put("accessibility", "/reports/" + runId + "/axe-result/index.html");
+            }
+
             status.setReportUrls(reportUrls);
 
             if (result.exitCode() == 0) {
@@ -130,6 +140,10 @@ public class TestExecutionService {
 
             // Write executor.json for Allure (enables executor widget and trends in combined reports)
             writeExecutorJson(runId, request);
+
+            // Auto-generate Allure report so the URL is immediately accessible
+            generateAllureReport(runId).ifPresent(url -> reportUrls.put("allure", url));
+            status.setReportUrls(reportUrls);
 
             log.info("Test execution finished: runId={}, exitCode={}", runId, result.exitCode());
 
@@ -431,10 +445,10 @@ public class TestExecutionService {
         // Read tags from existing executor.json (written during test execution)
         String runTags = readTagsFromExecutorJson(sourceDir);
 
-        // Build label:  Run <shortId> <yyyyMMddHHmm> <tags>
-        String suiteLabel = "Run " + runLabel
-                + (formattedDate.isEmpty() ? "" : " " + formattedDate)
-                + (runTags.isEmpty()       ? "" : " " + runTags);
+        // Build label:  <yyyyMMddHHmm> <shortId> <tags>
+        String suiteLabel = (formattedDate.isEmpty() ? "" : formattedDate + " ")
+                + runLabel
+                + (runTags.isEmpty() ? "" : " " + runTags);
 
         try (var files = Files.list(sourceDir)) {
             files.forEach(source -> {

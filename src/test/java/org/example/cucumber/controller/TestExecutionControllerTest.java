@@ -197,7 +197,8 @@ class TestExecutionControllerTest {
                 .thenReturn(Optional.of("http://localhost:8080/reports/" + TEST_RUN_ID + "/index.html"));
 
         mockMvc.perform(get("/api/v1/test/report/{runId}/url", TEST_RUN_ID))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportUrl").isNotEmpty());
     }
 
     @Test
@@ -323,7 +324,7 @@ class TestExecutionControllerTest {
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
-    // --- POST /api/v1/test/combined-report/generate ---
+    // --- POST /api/v1/test/report/combined/generate ---
 
     @Test
     void generateCombinedReport_WithRunIds_Returns200() throws Exception {
@@ -336,7 +337,7 @@ class TestExecutionControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/test/combined-report/generate")
+        mockMvc.perform(post("/api/v1/test/report/combined/generate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isOk())
@@ -349,7 +350,7 @@ class TestExecutionControllerTest {
         when(testExecutionService.generateCombinedAllureReport(null))
                 .thenReturn(Optional.of("/reports/combined/allure-report/index.html"));
 
-        mockMvc.perform(post("/api/v1/test/combined-report/generate"))
+        mockMvc.perform(post("/api/v1/test/report/combined/generate"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reportUrl").value("/reports/combined/allure-report/index.html"));
     }
@@ -365,7 +366,7 @@ class TestExecutionControllerTest {
                 }
                 """;
 
-        mockMvc.perform(post("/api/v1/test/combined-report/generate")
+        mockMvc.perform(post("/api/v1/test/report/combined/generate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isNotFound());

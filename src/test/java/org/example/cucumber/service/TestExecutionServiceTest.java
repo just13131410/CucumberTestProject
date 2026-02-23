@@ -4,6 +4,7 @@ import org.example.CucumberRunnerService;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
+import org.example.integration.zephyr.ZephyrScaleService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,12 +36,14 @@ class TestExecutionServiceTest {
 
     @Mock
     private CucumberRunnerService cucumberRunnerService;
+    @Mock
+    private ZephyrScaleService zephyrScaleService;
 
     private TestExecutionService testExecutionService;
 
     @BeforeEach
     void setUp() {
-        testExecutionService = new TestExecutionService(cucumberRunnerService);
+        testExecutionService = new TestExecutionService(cucumberRunnerService, zephyrScaleService);
     }
 
     @AfterEach

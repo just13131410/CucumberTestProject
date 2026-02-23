@@ -7,6 +7,7 @@ import org.example.cucumber.context.TestContext;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
+import org.example.integration.zephyr.ZephyrScaleService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -31,13 +32,16 @@ public class TestExecutionService {
     private static final int MAX_CONCURRENT_RUNS = 5;
 
     private final CucumberRunnerService cucumberRunnerService;
+    private final ZephyrScaleService zephyrScaleService;
     private final ExecutorService executor;
     private final Map<UUID, TestStatus> statusMap = new ConcurrentHashMap<>();
     private final Map<UUID, Future<?>> runningFutures = new ConcurrentHashMap<>();
     private final Semaphore concurrencyLimiter = new Semaphore(MAX_CONCURRENT_RUNS);
 
-    public TestExecutionService(CucumberRunnerService cucumberRunnerService) {
+    public TestExecutionService(CucumberRunnerService cucumberRunnerService,
+                                ZephyrScaleService zephyrScaleService) {
         this.cucumberRunnerService = cucumberRunnerService;
+        this.zephyrScaleService = zephyrScaleService;
         this.executor = Executors.newFixedThreadPool(MAX_CONCURRENT_RUNS, r -> {
             Thread t = new Thread(r);
             t.setName("test-executor-" + t.getId());
@@ -144,6 +148,9 @@ public class TestExecutionService {
             // Auto-generate Allure report so the URL is immediately accessible
             generateAllureReport(runId).ifPresent(url -> reportUrls.put("allure", url));
             status.setReportUrls(reportUrls);
+
+            // Upload results to Zephyr Scale / create Jira ticket (no-op if disabled)
+            zephyrScaleService.uploadRunResults(runId, request, result.exitCode(), status);
 
             log.info("Test execution finished: runId={}, exitCode={}", runId, result.exitCode());
 

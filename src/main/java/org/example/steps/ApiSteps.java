@@ -1,8 +1,10 @@
 package org.example.steps;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.cucumber.java.en.Given;
-import io.cucumber.java.en.When;
 import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
 import io.qameta.allure.Allure;
 import io.qameta.allure.restassured.AllureRestAssured;
 import io.restassured.response.Response;
@@ -18,9 +20,7 @@ import org.w3c.dom.Document;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.InputStream;
-import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -30,13 +30,31 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 
 public class ApiSteps {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private String baseUrl;
     private Response response;
+    private Map<String, Object> testData;
 
     @Given("API Basis-URL ist gesetzt")
     public void setBaseUrl() {
         this.baseUrl = ConfigReader.get("apiURL", "https://jsonplaceholder.typicode.com");
-        Allure.step("Base URl gesetzt auf: " + this.baseUrl);
+        Allure.step("Base URL gesetzt auf: " + this.baseUrl);
+    }
+
+    @Given("die Testdatei {string} ist geladen")
+    public void loadTestData(String fileName) throws Exception {
+        String path = "TestData/" + fileName;
+        Allure.step("Testdaten laden aus Classpath: " + path);
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
+            if (is == null) {
+                throw new IllegalStateException("Testdatei nicht im Classpath gefunden: " + path);
+            }
+            testData = objectMapper.readValue(is, new TypeReference<>() {});
+        }
+        Allure.addAttachment("Geladene Testdaten (" + fileName + ")", "application/json",
+                new ByteArrayInputStream(objectMapper.writerWithDefaultPrettyPrinter()
+                        .writeValueAsBytes(testData)), ".json");
     }
 
     @When("ich GET an {string} ausführe")
@@ -61,48 +79,27 @@ public class ApiSteps {
         assertThat("JSON-Feld stimmt nicht", response.jsonPath().getInt(field), equalTo(expected));
     }
 
-    /**
-     * Lädt ein PDF entweder per HTTP (Prod: PDF_BASE_URL gesetzt) oder vom lokalen Dateisystem (Dev).
-     * Prod: GET ${pdf.base.url}/${fileName}  → z.B. https://.../reports/Response.pdf
-     * Dev:  new File(fileName)               → ./Response.pdf im Projektordner
-     */
-    private byte[] loadPdf(String fileName) throws Exception {
-        String baseUrl = ConfigReader.get("pdf.base.url", "");
-        if (baseUrl != null && !baseUrl.isBlank()) {
-            String url = baseUrl.replaceAll("/$", "") + "/" + fileName;
-            Allure.step("PDF per HTTP laden: " + url);
-            try (InputStream in = URI.create(url).toURL().openStream()) {
-                return in.readAllBytes();
-            }
-        } else {
-            Allure.step("PDF vom Dateisystem laden: " + new File(fileName).getAbsolutePath());
-            return java.nio.file.Files.readAllBytes(new File(fileName).toPath());
-        }
-    }
-
-    @Then("die Datei {string} enthält die Felder der API-Antwort")
-    public void verifyPdfContainsApiResponseFields(String fileName) throws Exception {
-        byte[] pdfBytes = loadPdf(fileName);
+    @Then("die PDF-Datei {string} enthält alle Felder aus {string}")
+    public void verifyPdfContainsFieldsFromJson(String pdfFile, String jsonFile) throws Exception {
+        byte[] pdfBytes = loadTestDataFile(pdfFile);
 
         try (PDDocument doc = PDDocument.load(pdfBytes)) {
             String pdfText = new PDFTextStripper().getText(doc);
 
-            // Extrahierten PDF-Text als Attachment anfügen
             Allure.addAttachment("Extrahierter PDF-Text", "text/plain",
                     new ByteArrayInputStream(pdfText.getBytes()), ".txt");
 
-            // Geprüfte Felder mit Werten aus der API-Antwort
             Map<String, String> felder = new LinkedHashMap<>();
-            felder.put("userId", String.valueOf(response.jsonPath().getInt("userId")));
-            felder.put("id",     String.valueOf(response.jsonPath().getInt("id")));
-            felder.put("title",  response.jsonPath().getString("title"));
+            felder.put("userId", String.valueOf(testData.get("userId")));
+            felder.put("id",     String.valueOf(testData.get("id")));
+            felder.put("title",  String.valueOf(testData.get("title")));
 
-            // Jeden Feldvergleich als eigenen Allure-Unterschritt ausgeben
             for (Map.Entry<String, String> entry : felder.entrySet()) {
                 String feldName  = entry.getKey();
                 String erwartung = entry.getValue();
                 Allure.step(
-                        String.format("PDF-Text enthält Feld '%s' → erwartet: \"%s\"", feldName, erwartung),
+                        String.format("PDF enthält Feld '%s' → erwartet aus %s: \"%s\"",
+                                feldName, jsonFile, erwartung),
                         () -> assertThat(
                                 String.format("PDF enthält '%s' mit Wert '%s'", feldName, erwartung),
                                 pdfText, containsString(erwartung))
@@ -111,9 +108,9 @@ public class ApiSteps {
         }
     }
 
-    @Then("das eingebettete XML in {string} stimmt mit der API-Antwort überein")
-    public void verifyEmbeddedXmlMatchesApiResponse(String fileName) throws Exception {
-        byte[] pdfBytes = loadPdf(fileName);
+    @Then("das eingebettete XML in {string} stimmt mit {string} überein")
+    public void verifyEmbeddedXmlMatchesJson(String pdfFile, String jsonFile) throws Exception {
+        byte[] pdfBytes = loadTestDataFile(pdfFile);
 
         try (PDDocument doc = PDDocument.load(pdfBytes)) {
             PDDocumentNameDictionary names = new PDDocumentNameDictionary(doc.getDocumentCatalog());
@@ -127,53 +124,55 @@ public class ApiSteps {
             PDEmbeddedFile embeddedFile = embeddedFiles.get("Response.xml").getEmbeddedFile();
             byte[] xmlBytes = embeddedFile.toByteArray();
 
-            // Eingebettetes XML als Attachment anfügen
             Allure.addAttachment("Eingebettetes XML (aus PDF)", "text/xml",
                     new ByteArrayInputStream(xmlBytes), ".xml");
 
             DocumentBuilder db = DocumentBuilderFactory.newInstance().newDocumentBuilder();
             Document xml = db.parse(new ByteArrayInputStream(xmlBytes));
 
-            // Vergleichswerte: XML-Wert vs. API-Wert
             Map<String, String[]> vergleiche = new LinkedHashMap<>();
             vergleiche.put("userId", new String[]{
-                    xmlValue(xml, "userId"),
-                    String.valueOf(response.jsonPath().getInt("userId"))});
+                    xmlValue(xml, "userId"), String.valueOf(testData.get("userId"))});
             vergleiche.put("id", new String[]{
-                    xmlValue(xml, "id"),
-                    String.valueOf(response.jsonPath().getInt("id"))});
+                    xmlValue(xml, "id"), String.valueOf(testData.get("id"))});
             vergleiche.put("title", new String[]{
-                    xmlValue(xml, "title"),
-                    response.jsonPath().getString("title")});
+                    xmlValue(xml, "title"), String.valueOf(testData.get("title"))});
             vergleiche.put("body", new String[]{
-                    xmlValue(xml, "body").trim(),
-                    response.jsonPath().getString("body").trim()});
+                    xmlValue(xml, "body").trim(), String.valueOf(testData.get("body")).trim()});
 
-            // Vergleichstabelle als Attachment (übersichtliche Gegenüberstellung)
-            Allure.addAttachment("Feldvergleich XML ↔ API", "text/plain",
-                    new ByteArrayInputStream(vergleichstabelle(vergleiche).getBytes()), ".txt");
+            Allure.addAttachment("Feldvergleich XML ↔ " + jsonFile, "text/plain",
+                    new ByteArrayInputStream(vergleichstabelle(vergleiche, jsonFile).getBytes()), ".txt");
 
-            // Jeden Feldvergleich als eigenen Allure-Unterschritt ausgeben
             for (Map.Entry<String, String[]> entry : vergleiche.entrySet()) {
-                String feldName  = entry.getKey();
-                String xmlWert   = entry.getValue()[0];
-                String apiWert   = entry.getValue()[1];
+                String feldName = entry.getKey();
+                String xmlWert  = entry.getValue()[0];
+                String jsonWert = entry.getValue()[1];
                 Allure.step(
-                        String.format("Feld '%s': XML=\"%s\" == API=\"%s\"",
-                                feldName, kurz(xmlWert), kurz(apiWert)),
+                        String.format("Feld '%s': XML=\"%s\" == %s=\"%s\"",
+                                feldName, kurz(xmlWert), jsonFile, kurz(jsonWert)),
                         () -> assertThat(
                                 String.format("Feld '%s' stimmt nicht überein", feldName),
-                                xmlWert, equalTo(apiWert))
+                                xmlWert, equalTo(jsonWert))
                 );
             }
         }
     }
 
-    /** Erstellt eine lesbare Vergleichstabelle für das Allure-Attachment. */
-    private String vergleichstabelle(Map<String, String[]> vergleiche) {
+    private byte[] loadTestDataFile(String fileName) throws Exception {
+        String path = "TestData/" + fileName;
+        Allure.step("Testdatei laden aus Classpath: " + path);
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
+            if (is == null) {
+                throw new IllegalStateException("Testdatei nicht im Classpath gefunden: " + path);
+            }
+            return is.readAllBytes();
+        }
+    }
+
+    private String vergleichstabelle(Map<String, String[]> vergleiche, String jsonFile) {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("%-10s | %-55s | %-55s | %s%n",
-                "Feld", "XML-Wert", "API-Wert", "OK?"));
+                "Feld", "XML-Wert", jsonFile + "-Wert", "OK?"));
         sb.append("-".repeat(135)).append("\n");
         for (Map.Entry<String, String[]> e : vergleiche.entrySet()) {
             boolean gleich = e.getValue()[0].equals(e.getValue()[1]);

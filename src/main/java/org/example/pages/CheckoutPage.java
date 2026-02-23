@@ -23,6 +23,6 @@ public class CheckoutPage extends BasePage{
     }
 
     public void checkoutSuccessful() {
-        assertTrue(page.isVisible("text=THANK YOU FOR YOUR ORDER"));
+        assertTrue(page.isVisible("text=TESTINGJIRA"));
     }
 }

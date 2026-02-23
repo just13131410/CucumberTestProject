@@ -90,4 +90,8 @@ public class TestExecutionRequest {
     @Schema(description = "Initiator der Test-Ausfuehrung",
             example = "jenkins-pipeline")
     private String initiator;
+
+    @Schema(description = "Jira/Zephyr Scale Projekt-Schluessel (optional, z.B. PROJ)",
+            example = "PROJ")
+    private String projectKey;
 }

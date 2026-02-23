@@ -97,6 +97,7 @@ class TestStatusTest {
         assertNull(status.getEndTime());
         assertNull(status.getErrorMessage());
         assertNull(status.getReportUrls());
+        assertNull(status.getJiraTicketKey());
     }
 
     // --- duration field is String (mm:ss) ---
@@ -132,6 +133,34 @@ class TestStatusTest {
 
         assertFalse(json.contains("successRate"),
                 "successRate must not appear in JSON response, but was found in: " + json);
+    }
+
+    // --- jiraTicketKey field ---
+
+    @Test
+    void jiraTicketKey_AppearsInJsonWhenSet() throws Exception {
+        TestStatus status = TestStatus.builder()
+                .runId(UUID.randomUUID())
+                .status("FAILED")
+                .jiraTicketKey("PROJ-42")
+                .build();
+
+        String json = new ObjectMapper().writeValueAsString(status);
+
+        assertTrue(json.contains("jiraTicketKey"), "jiraTicketKey must appear in JSON");
+        assertTrue(json.contains("PROJ-42"), "ticket key value must appear in JSON");
+    }
+
+    @Test
+    void jiraTicketKey_AbsentFromJsonWhenNull() throws Exception {
+        TestStatus status = TestStatus.builder()
+                .status("COMPLETED")
+                .build();
+
+        String json = new ObjectMapper().writeValueAsString(status);
+
+        assertFalse(json.contains("jiraTicketKey"),
+                "jiraTicketKey must not appear in JSON when null");
     }
 
     @Test

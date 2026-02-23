@@ -72,6 +72,9 @@ public class TestStatus {
     @Schema(description = "Fehlermeldung (bei Fehler)")
     private String errorMessage;
 
+    @Schema(description = "Jira Bug-Ticket-Key bei fehlgeschlagenen Runs (z.B. PROJ-42)")
+    private String jiraTicketKey;
+
     @Schema(description = "Report-URLs")
     private Map<String, String> reportUrls;
 

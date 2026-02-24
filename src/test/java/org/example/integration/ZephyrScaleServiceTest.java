@@ -43,6 +43,8 @@ class ZephyrScaleServiceTest {
         ReflectionTestUtils.setField(service, "jiraEnabled", false);
         ReflectionTestUtils.setField(service, "jiraAssigneeAccountId", "automation-user");
         ReflectionTestUtils.setField(service, "jiraIssueType", "Bug");
+        ReflectionTestUtils.setField(service, "mockEnabled", false);
+        ReflectionTestUtils.setField(service, "zephyrBaseUrl", "https://jira.test.com");
     }
 
     private TestExecutionRequest createRequest(List<String> tags) {
@@ -273,6 +275,63 @@ class ZephyrScaleServiceTest {
     }
 
     // --- Existing folder reuse ---
+
+    // --- Mock-Modus ---
+
+    @Test
+    void mockMode_CompletedRun_SetsZephyrRunUrlInReportUrls() {
+        ReflectionTestUtils.setField(service, "mockEnabled", true);
+        ReflectionTestUtils.setField(service, "zephyrEnabled", false);
+
+        UUID runId = UUID.randomUUID();
+        TestStatus status = new TestStatus();
+        service.uploadRunResults(runId, createRequest(List.of("@SmokeTest")), 0, status);
+
+        verifyNoInteractions(zephyrClient, jiraClient);
+        assertNotNull(status.getReportUrls(), "reportUrls muss gesetzt sein");
+        assertTrue(status.getReportUrls().containsKey("zephyr-run"),
+                "reportUrls muss 'zephyr-run' enthalten");
+        assertTrue(status.getReportUrls().get("zephyr-run").contains("T-R-"),
+                "Zephyr-URL muss simulierten Cycle-Key enthalten");
+        assertNull(status.getJiraTicketKey(), "kein Jira-Ticket bei erfolgreichem Run");
+    }
+
+    @Test
+    void mockMode_FailedRun_SetsJiraTicketKeyAndUrl() {
+        ReflectionTestUtils.setField(service, "mockEnabled", true);
+        ReflectionTestUtils.setField(service, "zephyrEnabled", false);
+
+        UUID runId = UUID.randomUUID();
+        TestStatus status = new TestStatus();
+        service.uploadRunResults(runId, createRequest(List.of("@SmokeTest")), 1, status);
+
+        verifyNoInteractions(zephyrClient, jiraClient);
+        assertNotNull(status.getJiraTicketKey(), "jiraTicketKey muss gesetzt sein");
+        assertTrue(status.getJiraTicketKey().startsWith("PROJ-"),
+                "Ticket-Key muss mit Projekt-Key beginnen");
+        assertTrue(status.getReportUrls().containsKey("jira-ticket"),
+                "reportUrls muss 'jira-ticket' enthalten");
+        assertTrue(status.getReportUrls().get("jira-ticket").contains("/browse/PROJ-"),
+                "Jira-URL muss Browse-Pfad enthalten");
+        assertEquals(status.getJiraTicketKey(),
+                status.getMetadata().get("jiraTicket"),
+                "jiraTicketKey und metadata.jiraTicket müssen übereinstimmen");
+    }
+
+    @Test
+    void mockMode_FailedRun_TicketNumberDeterministicPerRunId() {
+        ReflectionTestUtils.setField(service, "mockEnabled", true);
+        ReflectionTestUtils.setField(service, "zephyrEnabled", false);
+
+        UUID runId = UUID.randomUUID();
+        TestStatus s1 = new TestStatus();
+        TestStatus s2 = new TestStatus();
+        service.uploadRunResults(runId, createRequest(List.of("@Backend")), 1, s1);
+        service.uploadRunResults(runId, createRequest(List.of("@Backend")), 1, s2);
+
+        assertEquals(s1.getJiraTicketKey(), s2.getJiraTicketKey(),
+                "gleiche runId muss immer denselben Ticket-Key erzeugen");
+    }
 
     @Test
     void uploadRunResults_ExistingFolder_SkipsCreation() {

@@ -9,5 +9,6 @@ Feature: Erste API Prüfung
   @T-3512 @Backend @SmokeTest
   Scenario: Response.pdf und eingebettetes XML stimmen mit Response.json überein
     Given die Testdatei "Response.json" ist geladen
+    # pdfDatei erzeugt
     Then die PDF-Datei "Response.pdf" enthält alle Felder aus "Response.json"
     And das eingebettete XML in "Response.pdf" stimmt mit "Response.json" überein

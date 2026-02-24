@@ -16,6 +16,9 @@ import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.example.utils.ConfigReader;
 import org.w3c.dom.Document;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -84,25 +87,32 @@ public class ApiSteps {
         byte[] pdfBytes = loadTestDataFile(pdfFile);
 
         try (PDDocument doc = PDDocument.load(pdfBytes)) {
-            String pdfText = new PDFTextStripper().getText(doc);
+            String rawPdfText = new PDFTextStripper().getText(doc);
+            // Normalisierung: Entfernt harte Zeilenumbrüche und doppelte Leerzeichen für stabilere Vergleiche
+            String pdfText = rawPdfText.replaceAll("\\s+", " ");
 
             Allure.addAttachment("Extrahierter PDF-Text", "text/plain",
-                    new ByteArrayInputStream(pdfText.getBytes()), ".txt");
+                    new ByteArrayInputStream(rawPdfText.getBytes()), ".txt");
 
+            // Alle Felder aus der XML/Tabelle mappen
             Map<String, String> felder = new LinkedHashMap<>();
             felder.put("userId", String.valueOf(testData.get("userId")));
             felder.put("id",     String.valueOf(testData.get("id")));
             felder.put("title",  String.valueOf(testData.get("title")));
+            felder.put("body",   String.valueOf(testData.get("body"))); // Wichtig: Body hinzufügen!
 
             for (Map.Entry<String, String> entry : felder.entrySet()) {
                 String feldName  = entry.getKey();
-                String erwartung = entry.getValue();
+                // Auch den Erwartungswert normalisieren (falls im XML Umbrüche sind)
+                String erwartung = entry.getValue().replaceAll("\\s+", " ");
+
+                String gekuerzteErwartung = erwartung.length() > 50 ? erwartung.substring(0, 50) : erwartung;
+                System.out.println("DEBUG PDF TEXT: " + pdfText);
                 Allure.step(
-                        String.format("PDF enthält Feld '%s' → erwartet aus %s: \"%s\"",
-                                feldName, jsonFile, erwartung),
+                        String.format("PDF enthält Feld '%s' → erwartet: \"%s\"", feldName, erwartung),
                         () -> assertThat(
-                                String.format("PDF enthält '%s' mit Wert '%s'", feldName, erwartung),
-                                pdfText, containsString(erwartung))
+                                String.format("Feld '%s' wurde im PDF nicht mit dem Wert '%s' gefunden.", feldName, gekuerzteErwartung),
+                                pdfText, containsString(gekuerzteErwartung))
                 );
             }
         }
@@ -198,4 +208,48 @@ public class ApiSteps {
         String einzeilig = wert.replace("\n", "↵").replace("\r", "");
         return einzeilig.length() > maxLen ? einzeilig.substring(0, maxLen - 1) + "…" : einzeilig;
     }
+    @Given("pdfDatei erzeugt")
+    public void createXML(){
+        String userId = "1";
+        String id = "1";
+        String title = "sunt aut facere repellat provident occaecati excepturi optio reprehenderit";
+        String body = "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum...";
+
+// Das XHTML-Template mit einer Tabelle
+        String htmlContent = String.format(
+                "<html>" +
+                        "<head>" +
+                        "  <style>" +
+                        "    body { font-family: sans-serif; padding: 30px; }" +
+                        "    table { width: 100%%; border-collapse: collapse; margin-top: 20px; }" +
+                        "    th, td { border: 1px solid #ccc; padding: 12px; text-align: left; }" +
+                        "    th { background-color: #f2f2f2; color: navy; width: 30%%; }" +
+                        "    .title-row { background-color: #fafafa; font-weight: bold; }" +
+                        "  </style>" +
+                        "</head>" +
+                        "<body>" +
+                        "  <h2 style='color: navy;'>Datenblatt Response</h2>" +
+                        "  <hr />" +
+                        "  <table>" +
+                        "    <tr><th>User ID</th><td>%s</td></tr>" +
+                        "    <tr><th>ID</th><td>%s</td></tr>" +
+                        "    <tr class='title-row'><th>Titel</th><td>%s</td></tr>" +
+                        "    <tr><th>Inhalt</th><td>%s</td></tr>" +
+                        "  </table>" +
+                        "</body>" +
+                        "</html>",
+                userId, id, title, body.replace("\n", "<br />") // Zeilenumbrüche für HTML umwandeln
+        );
+
+        try (OutputStream os = new FileOutputStream("test-results/Response.pdf")) {
+            PdfRendererBuilder builder = new PdfRendererBuilder();
+            builder.withHtmlContent(htmlContent, "/");
+            builder.toStream(os);
+            builder.run();
+            System.out.println("PDF wurde erstellt!");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
 }

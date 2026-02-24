@@ -50,9 +50,15 @@ public class ZephyrScaleService {
     @Value("${jira.issue-type:Bug}")
     private String jiraIssueType;
 
+    @Value("${integration.mock.enabled:false}")
+    private boolean mockEnabled;
+
+    @Value("${zephyr.base-url:https://jira.yourcompany.com}")
+    private String zephyrBaseUrl;
+
     public void uploadRunResults(UUID runId, TestExecutionRequest request, int exitCode, TestStatus status) {
-        if (!zephyrEnabled && !jiraEnabled) {
-            log.debug("Zephyr and Jira integrations disabled, skipping for runId={}", runId);
+        if (!zephyrEnabled && !jiraEnabled && !mockEnabled) {
+            log.debug("Alle Integrationen deaktiviert, überspringe runId={}", runId);
             return;
         }
 
@@ -63,6 +69,11 @@ public class ZephyrScaleService {
         }
 
         try {
+            if (mockEnabled) {
+                simulateResults(runId, request, exitCode, status, projectKey);
+                return;
+            }
+
             if (zephyrEnabled) {
                 uploadToZephyr(runId, request, exitCode, status, projectKey);
             }
@@ -226,6 +237,39 @@ public class ZephyrScaleService {
             }
             addMetadata(status, "jiraTicket", issue.getKey());
         }
+    }
+
+    private void simulateResults(UUID runId, TestExecutionRequest request,
+                                 int exitCode, TestStatus status, String projectKey) {
+        String shortId   = runId.toString().substring(0, 8).toUpperCase();
+        String cycleKey  = "T-R-" + shortId;
+        String base      = zephyrBaseUrl.replaceAll("/$", "");
+        String zephyrUrl = base + "/secure/Tests.jspa#/testRun/" + cycleKey;
+
+        log.info("[MOCK] Zephyr Test-Run simuliert: key={}, url={}", cycleKey, zephyrUrl);
+        addMetadata(status, "zephyrCycleKey", cycleKey);
+        addReportUrl(status, "zephyr-run", zephyrUrl);
+
+        if (exitCode != 0) {
+            int ticketNumber = Math.abs(runId.hashCode()) % 9000 + 1000;
+            String ticketKey = projectKey + "-" + ticketNumber;
+            String ticketUrl = base + "/browse/" + ticketKey;
+
+            log.info("[MOCK] Jira Ticket simuliert: key={}, url={}", ticketKey, ticketUrl);
+            status.setJiraTicketKey(ticketKey);
+            addMetadata(status, "jiraTicket", ticketKey);
+            addReportUrl(status, "jira-ticket", ticketUrl);
+        }
+    }
+
+    private void addReportUrl(TestStatus status, String key, String url) {
+        if (status == null) return;
+        Map<String, String> reportUrls = status.getReportUrls();
+        if (reportUrls == null) {
+            reportUrls = new LinkedHashMap<>();
+            status.setReportUrls(reportUrls);
+        }
+        reportUrls.put(key, url);
     }
 
     private void addMetadata(TestStatus status, String key, Object value) {

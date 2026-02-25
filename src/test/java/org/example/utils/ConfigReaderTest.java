@@ -101,4 +101,13 @@ class ConfigReaderTest {
         assertNotNull(apiUrl);
         // Both exist in config.properties and should be retrievable
     }
+
+    @Test
+    void get_ReturnsDefault_WhenDotenvIsMissingAndKeyNotElsewhereDefined() {
+        // In CI/CD und OpenShift existiert keine .env-Datei.
+        // ConfigReader muss trotzdem starten (ignoreIfMissing) und den Default liefern.
+        String result = ConfigReader.get("KEY_ONLY_IN_DOTENV_THAT_DOES_NOT_EXIST", "fallback");
+
+        assertEquals("fallback", result);
+    }
 }

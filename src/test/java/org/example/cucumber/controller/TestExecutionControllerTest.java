@@ -262,7 +262,7 @@ class TestExecutionControllerTest {
     void healthCheck_Returns200() throws Exception {
         mockMvc.perform(get("/api/v1/test/health"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("UP")));
+                .andExpect(jsonPath("$.status").value("UP"));
     }
 
     // --- GET /api/v1/test/statistics ---

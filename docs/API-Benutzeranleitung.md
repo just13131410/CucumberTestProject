@@ -482,7 +482,7 @@ Generiert einen übergreifenden Allure-Report über mehrere Test-Runs. Der kombi
 
 **Request:**
 ```
-POST /api/v1/test/combined-report/generate
+POST /api/v1/test/report/combined/generate
 Content-Type: application/json
 ```
 
@@ -494,12 +494,12 @@ Content-Type: application/json
 
 **Beispiel - Alle Runs kombinieren:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/test/combined-report/generate
+curl -X POST http://localhost:8080/api/v1/test/report/combined/generate
 ```
 
 **Beispiel - Bestimmte Runs kombinieren:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/test/combined-report/generate \
+curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
   -H "Content-Type: application/json" \
   -d '{
     "runIds": [
@@ -597,10 +597,10 @@ curl -s http://localhost:8080/api/v1/test/runs
 # --> ["550e8400-...", "660f9511-..."]
 
 # 2. Kombinierten Report generieren (alle Runs)
-curl -s -X POST http://localhost:8080/api/v1/test/combined-report/generate
+curl -s -X POST http://localhost:8080/api/v1/test/report/combined/generate
 
 # Oder: Nur bestimmte Runs kombinieren
-curl -s -X POST http://localhost:8080/api/v1/test/combined-report/generate \
+curl -s -X POST http://localhost:8080/api/v1/test/report/combined/generate \
   -H "Content-Type: application/json" \
   -d '{"runIds": ["550e8400-...", "660f9511-..."]}'
 

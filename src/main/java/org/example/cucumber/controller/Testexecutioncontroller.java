@@ -69,16 +69,11 @@ public class TestExecutionController {
 
             log.info("Test execution queued successfully: runId={}", response.getRunId());
 
-            return ResponseEntity
-                    .status(HttpStatus.ACCEPTED)
-                    .body(response);
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
 
         } catch (IllegalArgumentException e) {
             log.error("Invalid request parameters: {}", e.getMessage());
             throw e;
-        } catch (Exception e) {
-            log.error("Failed to queue test execution", e);
-            throw new RuntimeException("Failed to queue test execution", e);
         }
     }
 
@@ -104,10 +99,7 @@ public class TestExecutionController {
 
         return testExecutionService.getTestStatus(runId)
                 .map(status -> {
-                    if (status.getReportUrls() != null) {
-                        status.getReportUrls().replaceAll((key, value) ->
-                                value.startsWith("/") ? toAbsoluteUrl(value) : value);
-                    }
+                    resolveReportUrls(status);
                     return ResponseEntity.ok(status);
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -202,6 +194,7 @@ public class TestExecutionController {
             @ApiResponse(responseCode = "404", description = "Report noch nicht generiert")
     })
     public ResponseEntity<Map<String, String>> getReportUrl(
+            @Parameter(description = "Test Run ID", required = true)
             @PathVariable("runId") UUID runId) {
 
         log.debug("Fetching report URL for runId: {}", runId);
@@ -305,14 +298,6 @@ public class TestExecutionController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    private String toAbsoluteUrl(String relativePath) {
-        return ServletUriComponentsBuilder
-                .fromCurrentContextPath()
-                .path(relativePath)
-                .build()
-                .toString();
-    }
-
     /**
      * Health Check Endpoint
      */
@@ -320,8 +305,8 @@ public class TestExecutionController {
             produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Service Health Check",
             description = "Prüft die Verfügbarkeit des Test Service")
-    public ResponseEntity<String> healthCheck() {
-        return ResponseEntity.ok("{\"status\": \"UP\"}");
+    public ResponseEntity<Map<String, String>> healthCheck() {
+        return ResponseEntity.ok(Map.of("status", "UP"));
     }
 
     /**
@@ -342,5 +327,20 @@ public class TestExecutionController {
         Object statistics = testExecutionService.getStatistics(environment);
 
         return ResponseEntity.ok(statistics);
+    }
+
+    private void resolveReportUrls(TestStatus status) {
+        if (status.getReportUrls() != null) {
+            status.getReportUrls().replaceAll((key, value) ->
+                    value.startsWith("/") ? toAbsoluteUrl(value) : value);
+        }
+    }
+
+    private String toAbsoluteUrl(String relativePath) {
+        return ServletUriComponentsBuilder
+                .fromCurrentContextPath()
+                .path(relativePath)
+                .build()
+                .toString();
     }
 }

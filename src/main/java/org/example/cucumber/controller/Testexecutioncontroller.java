@@ -19,6 +19,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -64,6 +65,7 @@ public class TestExecutionController {
 
         try {
             TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+            response.setStatusUrl(toAbsoluteUrl("/api/v1/test/status/" + response.getRunId()));
 
             log.info("Test execution queued successfully: runId={}", response.getRunId());
 
@@ -101,7 +103,13 @@ public class TestExecutionController {
         log.debug("Fetching status for runId: {}", runId);
 
         return testExecutionService.getTestStatus(runId)
-                .map(ResponseEntity::ok)
+                .map(status -> {
+                    if (status.getReportUrls() != null) {
+                        status.getReportUrls().replaceAll((key, value) ->
+                                value.startsWith("/") ? toAbsoluteUrl(value) : value);
+                    }
+                    return ResponseEntity.ok(status);
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -172,7 +180,7 @@ public class TestExecutionController {
 
         return testExecutionService.generateAllureReport(runId)
                 .map(url -> ResponseEntity.ok(Map.of(
-                        "reportUrl", url,
+                        "reportUrl", toAbsoluteUrl(url),
                         "runId", runId.toString(),
                         "message", "Allure report successfully generated"
                 )))
@@ -199,7 +207,7 @@ public class TestExecutionController {
         log.debug("Fetching report URL for runId: {}", runId);
 
         return testExecutionService.getReportUrl(runId)
-                .map(url -> ResponseEntity.ok(Map.of("reportUrl", url)))
+                .map(url -> ResponseEntity.ok(Map.of("reportUrl", toAbsoluteUrl(url))))
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -291,10 +299,18 @@ public class TestExecutionController {
 
         return testExecutionService.generateCombinedAllureReport(runIds)
                 .map(url -> ResponseEntity.ok(Map.of(
-                        "reportUrl", url,
+                        "reportUrl", toAbsoluteUrl(url),
                         "message", "Combined Allure report successfully generated"
                 )))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    private String toAbsoluteUrl(String relativePath) {
+        return ServletUriComponentsBuilder
+                .fromCurrentContextPath()
+                .path(relativePath)
+                .build()
+                .toString();
     }
 
     /**

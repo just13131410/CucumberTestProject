@@ -341,7 +341,7 @@ class TestExecutionControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.reportUrl").value("/reports/combined/allure-report/index.html"))
+                .andExpect(jsonPath("$.reportUrl").value(containsString("/reports/combined/allure-report/index.html")))
                 .andExpect(jsonPath("$.message").value("Combined Allure report successfully generated"));
     }
 
@@ -352,7 +352,7 @@ class TestExecutionControllerTest {
 
         mockMvc.perform(post("/api/v1/test/report/combined/generate"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.reportUrl").value("/reports/combined/allure-report/index.html"));
+                .andExpect(jsonPath("$.reportUrl").value(containsString("/reports/combined/allure-report/index.html")));
     }
 
     @Test

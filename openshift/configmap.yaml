@@ -14,7 +14,7 @@ data:
   # Schlüssel entsprechen der ConfigReader-Konvention: key.toUpperCase().replace(".", "_")
   # "baseUrl" → BASEURL, "apiURL" → APIURL, "pdf.base.url" → PDF_BASE_URL
   BASEURL: "https://your-application-under-test.example.com"
-  APIURL: "https://your-api-under-test.example.com"
+  APIURL: "http://meine_api"
   # PDF-Quelle für ApiSteps (HTTP-Basis-URL zum PVC-Verzeichnis auf OpenShift)
   PDF_BASE_URL: "https://cucumber-test-service-test-automation.apps-crc.testing/reports"
   # Actuator on separate port

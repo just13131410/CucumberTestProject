@@ -53,7 +53,13 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
     -XX:MaxRAMPercentage=75.0 \
     -XX:+UseG1GC \
     -XX:MaxGCPauseMillis=200 \
-    -Djava.security.egd=file:/dev/./urandom"
+    -Djava.security.egd=file:/dev/./urandom \
+    -Dhttp.proxyHost= \
+    -Dhttps.proxyHost="
+
+# Proxy auch für non-Java-Tools (curl, npm, etc.) deaktivieren
+ENV no_proxy="*"
+ENV NO_PROXY="*"
 
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV TEST_RESULTS_PATH=/app/test-results

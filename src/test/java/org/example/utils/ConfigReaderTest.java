@@ -2,6 +2,12 @@ package org.example.utils;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -109,5 +115,71 @@ class ConfigReaderTest {
         String result = ConfigReader.get("KEY_ONLY_IN_DOTENV_THAT_DOES_NOT_EXIST", "fallback");
 
         assertEquals("fallback", result);
+    }
+
+    // --- loadSecretFiles Tests ---
+
+    @Test
+    void loadSecretFiles_ReturnsEmptyProperties_WhenDirectoryDoesNotExist() {
+        Properties result = ConfigReader.loadSecretFiles("/this/path/does/not/exist");
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void loadSecretFiles_LoadsKeyValueFromSingleFile(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "auth.properties", "db.password=secret123\ndb.user=admin");
+
+        Properties result = ConfigReader.loadSecretFiles(tempDir.toString());
+
+        assertEquals("secret123", result.getProperty("db.password"));
+        assertEquals("admin", result.getProperty("db.user"));
+    }
+
+    @Test
+    void loadSecretFiles_MergesMultipleFiles(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "a-db.properties", "db.password=fromA");
+        writePropertiesFile(tempDir, "b-api.properties", "api.token=tokenFromB");
+
+        Properties result = ConfigReader.loadSecretFiles(tempDir.toString());
+
+        assertEquals("fromA", result.getProperty("db.password"));
+        assertEquals("tokenFromB", result.getProperty("api.token"));
+    }
+
+    @Test
+    void loadSecretFiles_LaterFileOverridesEarlierOnSameKey(@TempDir Path tempDir) throws Exception {
+        // Alphabetisch: a-first kommt vor b-second → b-second gewinnt
+        writePropertiesFile(tempDir, "a-first.properties", "shared.key=fromFirst");
+        writePropertiesFile(tempDir, "b-second.properties", "shared.key=fromSecond");
+
+        Properties result = ConfigReader.loadSecretFiles(tempDir.toString());
+
+        assertEquals("fromSecond", result.getProperty("shared.key"));
+    }
+
+    @Test
+    void loadSecretFiles_IgnoresNonPropertiesFiles(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "secrets.properties", "real.key=value");
+        new File(tempDir.toFile(), "not-a-secret.txt").createNewFile();
+        new File(tempDir.toFile(), "readme.yaml").createNewFile();
+
+        Properties result = ConfigReader.loadSecretFiles(tempDir.toString());
+
+        assertEquals(1, result.size());
+        assertEquals("value", result.getProperty("real.key"));
+    }
+
+    @Test
+    void loadSecretFiles_ReturnsEmptyProperties_WhenDirectoryIsEmpty(@TempDir Path tempDir) {
+        Properties result = ConfigReader.loadSecretFiles(tempDir.toString());
+
+        assertTrue(result.isEmpty());
+    }
+
+    private void writePropertiesFile(Path dir, String filename, String content) throws Exception {
+        try (FileWriter writer = new FileWriter(new File(dir.toFile(), filename))) {
+            writer.write(content);
+        }
     }
 }

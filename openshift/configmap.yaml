@@ -20,3 +20,4 @@ data:
   # Actuator on separate port
   MANAGEMENT_SERVER_PORT: "8081"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  CONFIGPATH: "/etc/config"

@@ -13,8 +13,10 @@ data:
   # Override these per environment:
   # Schlüssel entsprechen der ConfigReader-Konvention: key.toUpperCase().replace(".", "_")
   # "baseUrl" → BASEURL, "apiURL" → APIURL, "pdf.base.url" → PDF_BASE_URL
-  BASEURL: "https://your-application-under-test.example.com"
-  APIURL: "http://meine_api"
+  BASEURL: "https://www.saucedemo.com"
+  APIURL: "https://api.github.com"
+  # Todo API (allure-todo-api Service im selben Namespace)
+  TODOAPIURL: "http://allure-todo-api:3000"
   # PDF-Quelle für ApiSteps (HTTP-Basis-URL zum PVC-Verzeichnis auf OpenShift)
   PDF_BASE_URL: "https://cucumber-test-service-test-automation.apps-crc.testing/reports"
   # Actuator on separate port

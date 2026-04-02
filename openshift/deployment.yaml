@@ -46,10 +46,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: cucumber-test-config
-            # secretRef is used when Vault is NOT available.
-            # When Vault is active, remove this block – secrets are injected via the Vault Agent sidecar.
-            - secretRef:
-                name: cucumber-test-secrets
           resources:
             requests:
               memory: "2Gi"
@@ -86,7 +82,15 @@ spec:
           volumeMounts:
             - name: test-results
               mountPath: /app/test-results
+            # Secret-Dateien unter CONFIGPATH – wird von ConfigReader.loadSecretFiles() gelesen.
+            # Bei aktivem Vault diesen Block entfernen (Vault schreibt direkt ins Dateisystem).
+            - name: app-secrets
+              mountPath: /etc/config
+              readOnly: true
       volumes:
         - name: test-results
           persistentVolumeClaim:
             claimName: test-results-pvc
+        - name: app-secrets
+          secret:
+            secretName: cucumber-test-secrets

@@ -110,8 +110,37 @@ public class TestExecutionService {
                 System.setProperty("browser.headless", request.getHeadless().toString());
             }
 
-            CucumberRunnerService.RunResult result = cucumberRunnerService.run(
-                    runId.toString(), tags, features);
+            // Count expected scenarios for progress tracking (best-effort, tag-unaware)
+            int totalScenarios = countScenariosInFeatures();
+            Path allureResultsPath = getResultsPath(runId).resolve("allure-results");
+            ScheduledExecutorService progressTracker = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "progress-tracker-" + runId.toString().substring(0, 8));
+                t.setDaemon(true);
+                return t;
+            });
+            progressTracker.scheduleAtFixedRate(() -> {
+                try {
+                    if (!Files.exists(allureResultsPath)) return;
+                    long completed;
+                    try (Stream<Path> files = Files.list(allureResultsPath)) {
+                        completed = files.filter(p -> p.getFileName().toString().endsWith("-result.json")).count();
+                    }
+                    TestStatus s = statusMap.get(runId);
+                    if (s != null) {
+                        int pct = totalScenarios > 0
+                                ? (int) Math.min(95, completed * 100 / totalScenarios)
+                                : (int) Math.min(95, completed * 5);
+                        s.setProgress(pct);
+                    }
+                } catch (IOException ignored) {}
+            }, 1, 2, TimeUnit.SECONDS);
+
+            CucumberRunnerService.RunResult result;
+            try {
+                result = cucumberRunnerService.run(runId.toString(), tags, features);
+            } finally {
+                progressTracker.shutdownNow();
+            }
 
             TestStatus status = statusMap.get(runId);
             status.setEndTime(LocalDateTime.now());
@@ -591,6 +620,30 @@ public class TestExecutionService {
             }
         } catch (IOException e) {
             log.warn("Failed to copy history directory", e);
+        }
+    }
+
+    private int countScenariosInFeatures() {
+        try {
+            java.net.URL featuresUrl = getClass().getClassLoader().getResource("features");
+            if (featuresUrl == null) return 0;
+            Path featuresDir = Path.of(featuresUrl.toURI());
+            try (Stream<Path> walk = Files.walk(featuresDir)) {
+                return (int) walk
+                        .filter(p -> p.toString().endsWith(".feature"))
+                        .flatMap(p -> {
+                            try { return Files.lines(p); }
+                            catch (IOException e) { return Stream.empty(); }
+                        })
+                        .filter(line -> {
+                            String t = line.trim();
+                            return t.startsWith("Scenario:") || t.startsWith("Scenario Outline:");
+                        })
+                        .count();
+            }
+        } catch (Exception e) {
+            log.debug("Could not count scenarios in feature files: {}", e.getMessage());
+            return 0;
         }
     }
 

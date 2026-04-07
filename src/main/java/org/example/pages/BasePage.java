@@ -5,8 +5,11 @@ import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import org.example.config.BrowserConfig;
+import org.example.utils.ConfigReader;
 
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 
 public abstract class BasePage {
 
@@ -16,24 +19,30 @@ public abstract class BasePage {
     public Page createPlaywrightPageInstance(String browserTypeAsString) {
         String normalized = (browserTypeAsString == null ? "chromium" : browserTypeAsString.trim()).toLowerCase();
 
+        String executablePath = ConfigReader.get("browser.executable.path", BrowserConfig.getExecutablePath());
+
+        // Ist ein externer Browser-Pfad gesetzt, Download des Playwright-eigenen Browsers unterdrücken.
+        Playwright.CreateOptions createOptions = new Playwright.CreateOptions();
+        if (executablePath != null && !executablePath.isBlank()) {
+            Map<String, String> env = new HashMap<>();
+            env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
+            createOptions.setEnv(env);
+        }
+
+        Playwright playwright = Playwright.create(createOptions);
         BrowserType browserType = switch (normalized) {
-            case "firefox" -> Playwright.create().firefox();
-            case "chromium", "chrome" -> Playwright.create().chromium();
-            case "webkit" -> Playwright.create().webkit();
+            case "firefox" -> playwright.firefox();
+            case "chromium", "chrome" -> playwright.chromium();
+            case "webkit" -> playwright.webkit();
             default -> throw new IllegalArgumentException(
                     "Unsupported browser type: '" + browserTypeAsString + "'. " +
                             "Use one of: Chromium, Firefox, Webkit"
             );
         };
 
-        boolean headless = !"false".equalsIgnoreCase(System.getProperty("browser.headless", "true"));
+        boolean headless = BrowserConfig.isHeadless();
         BrowserType.LaunchOptions options = new BrowserType.LaunchOptions().setHeadless(headless);
 
-        // Dev:  application-dev.properties → browser.executable.path = lokaler Browser-Pfad
-        // Prod: BROWSER_EXECUTABLE_PATH Env-Var (OpenShift) → aus Artifactory installierter Browser
-        //       Spring Relaxed Binding übersetzt die Env-Var automatisch auf browser.executable.path.
-        // Leer → Playwright nutzt seinen eingebetteten Browser (kein externer Pfad nötig).
-        String executablePath = BrowserConfig.getExecutablePath();
         if (executablePath != null && !executablePath.isBlank()) {
             options.setExecutablePath(Path.of(executablePath));
         }

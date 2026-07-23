@@ -27,6 +27,8 @@ public class BrowserConfig {
     public void setExtraArgs(String args) {
         if (args != null && !args.isBlank()) {
             BrowserConfig.extraArgs = Arrays.asList(args.split(","));
+        } else {
+            BrowserConfig.extraArgs = List.of();
         }
     }
 

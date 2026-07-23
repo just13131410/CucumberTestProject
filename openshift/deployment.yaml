@@ -82,6 +82,9 @@ spec:
           volumeMounts:
             - name: test-results
               mountPath: /app/test-results
+            # Persistenter Playwright-Browser-Cache (über den Mirror geladen, dann wiederverwendet).
+            - name: ms-playwright
+              mountPath: /ms-playwright
             # Secret-Dateien unter CONFIGPATH – wird von ConfigReader.loadSecretFiles() gelesen.
             # Bei aktivem Vault diesen Block entfernen (Vault schreibt direkt ins Dateisystem).
             - name: app-secrets
@@ -91,6 +94,9 @@ spec:
         - name: test-results
           persistentVolumeClaim:
             claimName: test-results-pvc
+        - name: ms-playwright
+          persistentVolumeClaim:
+            claimName: ms-playwright-pvc
         - name: app-secrets
           secret:
             secretName: cucumber-test-secrets

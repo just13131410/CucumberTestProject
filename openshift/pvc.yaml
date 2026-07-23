@@ -13,3 +13,22 @@ spec:
       storage: 10Gi
   # Uncomment and set for your cluster's storage class:
   # storageClassName: managed-nfs-storage
+---
+# Persistenter Playwright-Browser-Cache (PLAYWRIGHT_BROWSERS_PATH=/ms-playwright).
+# Überlebt Pod-Restarts → der Browser wird nur einmal über den Mirror geladen und danach
+# wiederverwendet (Re-Download nur bei neuer Playwright-/Browser-Version).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ms-playwright-pvc
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  # Uncomment and set for your cluster's storage class:
+  # storageClassName: managed-nfs-storage

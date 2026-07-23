@@ -8,8 +8,19 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: "prod"
   TEST_RESULTS_PATH: "/app/test-results"
-  PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright"
   CUCUMBER_PARALLEL_THREADS: "4"
+  # ---- Playwright Browser-Download über den internen Mirror ----
+  PLAYWRIGHT_MIRROR_ENABLED: "true"
+  # Mirror-Service. Cross-Namespace-DNS, falls der Mirror in eigenem Namespace läuft:
+  #   http://playwright-mirror.<mirror-namespace>.svc:10123
+  # Alternativ die LAN-IP des Mirror-Hosts (Podman auf Windows), siehe Artifactory/README.md.
+  PLAYWRIGHT_DOWNLOAD_HOST: "http://playwright-mirror.playwright-mirror.svc:10123"
+  # Chromium-spezifischer Host (PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST) wird vom Service automatisch
+  # aus PLAYWRIGHT_DOWNLOAD_HOST + "/builds/cft" abgeleitet – nur bei abweichendem Mirror setzen.
+  # Persistenter Browser-Cache (PVC-Mount) → Reuse über Pod-Restarts, Re-Download nur bei neuer Version.
+  PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright"
+  # Browser (Default Chromium) bereits beim Pod-Start laden.
+  PLAYWRIGHT_INSTALL_ON_STARTUP: "true"
   # Override these per environment:
   # Schlüssel entsprechen der ConfigReader-Konvention: key.toUpperCase().replace(".", "_")
   # "baseUrl" → BASEURL, "apiURL" → APIURL, "pdf.base.url" → PDF_BASE_URL

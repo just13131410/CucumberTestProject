@@ -11,10 +11,16 @@ public class BrowserConfig {
 
     private static String executablePath = "";
     private static List<String> extraArgs = List.of();
+    private static boolean headless = true;
 
     @Value("${browser.executable.path:}")
     public void setExecutablePath(String path) {
         BrowserConfig.executablePath = path;
+    }
+
+    @Value("${browser.headless:true}")
+    public void setHeadless(boolean value) {
+        BrowserConfig.headless = value;
     }
 
     @Value("${browser.extra.args:}")
@@ -30,6 +36,10 @@ public class BrowserConfig {
      */
     public static String getExecutablePath() {
         return executablePath;
+    }
+
+    public static boolean isHeadless() {
+        return headless;
     }
 
     /** Gibt zusätzliche Browser-Launch-Argumente zurück (z.B. für Container-Umgebungen). */

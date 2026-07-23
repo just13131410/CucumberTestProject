@@ -8,6 +8,7 @@ import io.cucumber.java.de.Gegebensei;
 import io.cucumber.java.de.Dann;
 import io.cucumber.java.de.Wenn;
 import io.cucumber.java.de.Und;
+import org.example.config.PlaywrightBrowserInstaller;
 import org.example.hooks.AxeReportHook;
 import org.example.pages.BasePage;
 import org.example.utils.ConfigReader;
@@ -16,17 +17,25 @@ import java.util.regex.Pattern;
 
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static org.example.hooks.TakeScreenshots.captureScreenshot;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class DashboardSteps extends BasePage {
 
     private final String baseUrl = ConfigReader.get("baseUrl", "http://localhost:4200/");
+    private final PlaywrightBrowserInstaller browserInstaller;
     private Scenario currentScenario;
+
+    public DashboardSteps(PlaywrightBrowserInstaller browserInstaller) {
+        this.browserInstaller = browserInstaller;
+    }
 
     @Before
     public void setUp(Scenario scenario) {
         this.currentScenario = scenario;
-        page = createPlaywrightPageInstance(System.getProperty("browser"));
+        String browserName = System.getProperty("browser");
+        browserInstaller.ensureInstalled(browserName);
+        page = createPlaywrightPageInstance(browserName);
     }
 
     @After
@@ -68,6 +77,7 @@ public class DashboardSteps extends BasePage {
     @Dann("die Tabelle sollte mindestens eine Zeile mit Daten enthalten")
     public void die_tabelle_sollte_mindestens_eine_zeile_mit_daten_enthalten() {
         page.waitForSelector("table tbody tr");
+        assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
         int rowCount = page.locator("table tbody tr").count();
         assertTrue(rowCount > 0);
     }
@@ -99,10 +109,54 @@ public class DashboardSteps extends BasePage {
         page.locator("mat-form-field").filter(new Locator.FilterOptions().setHasText("UUID")).locator("input").fill(uuid);
     }
 
+    private boolean isValidGuid(String value) {
+        return value != null && value.matches(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        );
+    }
+
+    private int heutigesDatum() {
+        return java.time.LocalDate.now().getDayOfMonth();
+    }
+
+    private String heutigesDatumFormatiert() {
+        return java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy"));
+    }
+
+    @Wenn("ich im Filter für das Datum heute auswähle")
+    public void ich_im_filter_fuer_das_datum_heute_auswaehle() {
+        ich_im_filter_fuer_das_datum_den_auswaehle(String.valueOf(heutigesDatum()));
+    }
+
     @Wenn("ich im Filter für das Datum den {string} auswähle")
     public void ich_im_filter_fuer_das_datum_den_auswaehle(String day) {
         page.locator("mat-datepicker-toggle").click();
         page.locator("button.mat-calendar-body-cell").filter(new Locator.FilterOptions().setHasText(Pattern.compile("^\\s*" + day + "\\s*$"))).click();
+    }
+
+    @Wenn("ich im Filter für das Datum {string} auswähle")
+    public void ich_im_filter_fuer_das_datum_auswaehle(String isoDate) {
+        java.time.LocalDate target = java.time.LocalDate.parse(isoDate,
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        page.locator("mat-datepicker-toggle").click();
+
+        // Der Kalender öffnet auf dem aktuellen Monat. Deterministisch – und
+        // locale-unabhängig – über die Vor-/Zurück-Pfeile zum Zielmonat navigieren,
+        // statt uns auf lokalisierte Monatsnamen zu verlassen.
+        java.time.YearMonth current = java.time.YearMonth.now();
+        java.time.YearMonth targetMonth = java.time.YearMonth.from(target);
+        long months = java.time.temporal.ChronoUnit.MONTHS.between(current, targetMonth);
+        String navButton = months < 0
+                ? "button.mat-calendar-previous-button"
+                : "button.mat-calendar-next-button";
+        for (long i = 0; i < Math.abs(months); i++) {
+            page.locator(navButton).click();
+        }
+
+        page.locator("button.mat-calendar-body-cell")
+                .filter(new Locator.FilterOptions().setHasText(
+                        Pattern.compile("^\\s*" + target.getDayOfMonth() + "\\s*$")))
+                .click();
     }
 
     @Wenn("auf den Button {string} klicke")
@@ -115,9 +169,10 @@ public class DashboardSteps extends BasePage {
     public void sollten_in_der_tabelle_nur_zeilen_mit_dem_typ_angezeigt_werden(String expectedTyp) {
         Locator rows = page.locator("table tbody tr");
         int count = rows.count();
+        assertTrue(count > 0, "Tabelle enthält keine Zeilen — kein Typ prüfbar");
         for (int i = 0; i < count; i++) {
             String text = rows.nth(i).locator("td.mat-column-typ").textContent();
-            assertTrue(text.trim().equals(expectedTyp));
+            assertEquals(expectedTyp, text.trim(), "Zeile %d: erwarteter Typ '%s'".formatted(i, expectedTyp));
         }
         captureScreenshot(page, "FilterTyp", currentScenario);
     }
@@ -126,25 +181,28 @@ public class DashboardSteps extends BasePage {
     public void sollten_in_der_tabelle_nur_zeilen_mit_dem_typ_und_status_angezeigt_werden(String expectedTyp, String expectedStatus) {
         Locator rows = page.locator("table tbody tr");
         int count = rows.count();
+        assertTrue(count > 0, "Tabelle enthält keine Zeilen — kein Typ/Status prüfbar");
         for (int i = 0; i < count; i++) {
             String typ = rows.nth(i).locator("td.mat-column-typ").textContent();
             String status = rows.nth(i).locator("td.mat-column-status").textContent();
-            assertTrue(typ.trim().equals(expectedTyp));
-            assertTrue(status.trim().equals(expectedStatus));
+            assertEquals(expectedTyp, typ.trim(), "Zeile %d: erwarteter Typ '%s'".formatted(i, expectedTyp));
+            assertEquals(expectedStatus, status.trim(), "Zeile %d: erwarteter Status '%s'".formatted(i, expectedStatus));
         }
         captureScreenshot(page, "FilterTypStatus", currentScenario);
     }
 
     @Dann("sollte die Tabelle genau {int} Zeilen anzeigen")
     public void sollte_die_tabelle_genau_zeilen_anzeigen(Integer count) {
+        assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
         int rowCount = page.locator("table tbody tr").count();
-        assertTrue(rowCount == count);
+        assertEquals(count.intValue(), rowCount, "Erwartete %d Zeilen, aber %d gefunden".formatted(count, rowCount));
     }
 
     @Dann("sollte die Tabelle genau {int} Zeile anzeigen")
     public void sollte_die_tabelle_genau_zeile_anzeigen(Integer count) {
+        assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
         int rowCount = page.locator("table tbody tr").count();
-        assertTrue(rowCount == count);
+        assertEquals(count.intValue(), rowCount, "Erwartete %d Zeile, aber %d gefunden".formatted(count, rowCount));
     }
 
     @Dann("sollte der Paginator {string} anzeigen")
@@ -184,9 +242,15 @@ public class DashboardSteps extends BasePage {
 
     @Dann("sollte die Tabelle Zeilen vom {string} anzeigen")
     public void sollte_die_tabelle_zeilen_vom_anzeigen(String datePrefix) {
+        assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
         java.util.List<String> contents = page.locator("table tbody tr td.mat-column-erstellungszeitpunkt").allTextContents();
+        assertTrue(contents.size() > 0, "Tabelle enthält keine Zeilen — kein Datum prüfbar");
+        java.time.LocalDate minDatum = java.time.LocalDate.parse(datePrefix, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         for (String cell : contents) {
-            assertTrue(cell.trim().contains(datePrefix));
+            String raw = cell.trim().substring(0, 10);
+            java.time.LocalDate zellDatum = java.time.LocalDate.parse(raw, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            assertTrue(!zellDatum.isBefore(minDatum),
+                "Datum '%s' ist älter als Filtergrenze '%s'".formatted(raw, datePrefix));
         }
         captureScreenshot(page, "DatumFilter", currentScenario);
     }
@@ -241,5 +305,50 @@ public class DashboardSteps extends BasePage {
     public void sollte_ich_zur_login_seite_weitergeleitet_werden() {
         assertThat(page).hasURL(Pattern.compile(".*login"));
         captureScreenshot(page, "RedirectToLogin", currentScenario);
+    }
+
+    @Dann("sollte die Tabelle {int} Zeilen anzeigen")
+    public void sollte_die_tabelle_zeilen_anzeigen(Integer count) {
+        page.waitForTimeout(500);
+        if (count == 0) {
+            assertThat(page.locator("table tbody")).containsText("Keine Daten für den Filter gefunden");
+        } else {
+            assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
+            int rowCount = page.locator("table tbody tr").count();
+            assertEquals(count.intValue(), rowCount, "Erwartete %d Zeilen, aber %d gefunden".formatted(count, rowCount));
+        }
+    }
+
+    @Wenn("die Tabelle {int} Zeilen anzeigt")
+    public void die_tabelle_zeilen_anzeigt(Integer count) {
+        page.waitForTimeout(500);
+        if (count == 0) {
+            assertThat(page.locator("table tbody")).containsText("Keine Daten für den Filter gefunden");
+        } else {
+            assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
+            int rowCount = page.locator("table tbody tr").count();
+            assertEquals(count.intValue(), rowCount, "Erwartete %d Zeilen, aber %d gefunden".formatted(count, rowCount));
+        }
+    }
+
+    @Wenn("ich den Filter zurücksetze")
+    public void ich_den_filter_zuruecksetze() {
+        page.locator("button").filter(new Locator.FilterOptions().setHasText("Filter zurücksetzen")).click();
+        page.waitForTimeout(500);
+    }
+
+    @Dann("eine Meldung {string} sollte sichtbar sein")
+    public void eine_meldung_sollte_sichtbar_sein(String meldung) {
+        assertThat(page.locator("body")).containsText(meldung);
+        captureScreenshot(page, "KeineTreffer", currentScenario);
+    }
+
+    @Dann("sollte die Tabelle wieder mindestens eine Zeile mit Daten enthalten")
+    public void sollte_die_tabelle_wieder_mindestens_eine_zeile_mit_daten_enthalten() {
+        page.waitForSelector("table tbody tr");
+        assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
+        int rowCount = page.locator("table tbody tr").count();
+        assertTrue(rowCount > 0);
+        captureScreenshot(page, "FilterZurueckgesetzt", currentScenario);
     }
 }

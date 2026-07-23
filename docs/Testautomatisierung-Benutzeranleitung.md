@@ -1,7 +1,7 @@
 # Benutzeranleitung Testautomatisierung
 
 **Zielgruppe:** Testautomatisierer
-**Gültig für:** CucumberTestProject (Spring Boot 4, Java 21, Cucumber 7, Playwright, REST Assured)
+**Gültig für:** CucumberTestProject (Spring Boot 4, Java 25, Cucumber 7, Playwright, REST Assured)
 
 ---
 

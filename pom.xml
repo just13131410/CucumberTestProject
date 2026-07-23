@@ -15,15 +15,14 @@
 
   <properties>
     <!-- Java Version -->
-    <java.version>21</java.version>
-    <maven.compiler.source>21</maven.compiler.source>
-    <maven.compiler.target>21</maven.compiler.target>
+    <java.version>25</java.version>
+    <maven.compiler.source>25</maven.compiler.source>
+    <maven.compiler.target>25</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <!-- Framework Versions -->
     <spring.boot.version>4.0.2</spring.boot.version>
     <cucumber.version>7.34.2</cucumber.version>
-    <junit.version>5.10.1</junit.version>
     <selenium.version>4.17.0</selenium.version>
     <rest-assured.version>6.0.0</rest-assured.version>
 
@@ -35,8 +34,10 @@
 
     <!-- Reporting -->
     <allure.version>2.32.0</allure.version>
-    <aspectj.version>1.9.21</aspectj.version>
-    <lombok.version>1.18.36</lombok.version>
+    <!-- aspectj 1.9.25+ erforderlich fuer Java 25 (1.9.24 = nur Java 24) -->
+    <aspectj.version>1.9.25</aspectj.version>
+    <!-- lombok 1.18.40+ erforderlich fuer JDK 25 -->
+    <lombok.version>1.18.40</lombok.version>
 
     <!-- Test Configuration -->
     <parallel.threads>4</parallel.threads>
@@ -99,16 +100,14 @@
       <version>${cucumber.version}</version>
     </dependency>
 
-    <!-- JUnit 5 -->
+    <!-- JUnit 5 (Versionen aus der Spring-Boot-BOM / junit-bom, nicht pinnen) -->
     <dependency>
       <groupId>org.junit.platform</groupId>
       <artifactId>junit-platform-suite</artifactId>
-      <version>1.10.1</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
-      <version>${junit.version}</version>
     </dependency>
 
     <!-- Playwright (fuer UI-Tests) -->
@@ -357,7 +356,8 @@
         <version>${jib-maven-plugin.version}</version>
         <configuration>
           <from>
-            <image>registry.access.redhat.com/ubi9/openjdk-21:1.18</image>
+            <!-- TODO: auf konkreten Tag pinnen (z.B. ubi9/openjdk-25:1.NN), sobald Registry-Zugriff besteht -->
+            <image>registry.access.redhat.com/ubi9/openjdk-25:latest</image>
           </from>
           <to>
             <image>your-registry.io/${project.artifactId}:${project.version}</image>
@@ -401,7 +401,8 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>0.8.11</version>
+        <!-- 0.8.14+ = offizieller Java-25-Support (0.8.13 nur experimentell) -->
+        <version>0.8.14</version>
         <executions>
           <execution>
             <goals>

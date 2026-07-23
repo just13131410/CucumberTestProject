@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: Build
 # ============================================================
-FROM registry.access.redhat.com/ubi9/openjdk-21:1.18 AS builder
+FROM registry.access.redhat.com/ubi9/openjdk-25:latest AS builder
 
 USER root
 WORKDIR /build
@@ -16,37 +16,39 @@ RUN mvn test -B
 RUN mvn package -DskipTests -B
 
 # ============================================================
-# Stage 2: Runtime with Playwright + Chrome
+# Stage 2: Runtime – Playwright lädt Chromium zur Laufzeit über den Mirror
 # ============================================================
-FROM registry.access.redhat.com/ubi9/openjdk-21:1.18
+FROM registry.access.redhat.com/ubi9/openjdk-25:latest
 
 USER root
 
-# Chrome RPM aus Artifactory installieren
-
-ARG CHROME_RPM_URL
-RUN test -n "${CHROME_RPM_URL}" || { echo "ERROR: --build-arg CHROME_RPM_URL ist nicht gesetzt"; exit 1; } && \
-    curl -L "${CHROME_RPM_URL}" -o /tmp/chrome.rpm && \
-    rpm -ivh --nodeps /tmp/chrome.rpm && \
-    rm /tmp/chrome.rpm
+# System-Bibliotheken, die der von Playwright heruntergeladene Chromium zum Starten braucht.
+# (Kein Browser-RPM mehr – der Browser kommt zur Laufzeit über den Playwright-Mirror.)
+RUN dnf install -y --setopt=install_weak_deps=False \
+        nss nspr atk at-spi2-atk at-spi2-core cups-libs libdrm libgbm \
+        libxcb libX11 libXcomposite libXdamage libXext libXfixes libXrandr \
+        libxkbcommon pango cairo alsa-lib libXtst \
+        liberation-fonts && \
+    dnf clean all && rm -rf /var/cache/dnf
 
 WORKDIR /app
 
 # Copy the built JAR
 COPY --from=builder /build/target/*.jar app.jar
 
-# Create directories and set permissions for OpenShift (arbitrary UID, GID 0)
-RUN mkdir -p /app/test-results && \
-    chown -R 1001:0 /app && \
-    chmod -R g=u /app
+# Verzeichnisse anlegen und Rechte für OpenShift (arbitrary UID, GID 0) setzen.
+# /ms-playwright ist der persistente Browser-Cache (PLAYWRIGHT_BROWSERS_PATH).
+RUN mkdir -p /app/test-results /ms-playwright && \
+    chown -R 1001:0 /app /ms-playwright && \
+    chmod -R g=u /app /ms-playwright
 
 USER 1001
 
 # Expose application and actuator ports
 EXPOSE 8080 8081
 
-# PVC mount point for test results
-VOLUME ["/app/test-results"]
+# PVC mount points: test-results + persistenter Playwright-Browser-Cache
+VOLUME ["/app/test-results", "/ms-playwright"]
 
 # Container-aware JVM tuning
 ENV JAVA_OPTS="-XX:+UseContainerSupport \
@@ -64,9 +66,14 @@ ENV NO_PROXY="*"
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV TEST_RESULTS_PATH=/app/test-results
 
-# Browser aus dem Artifactory (z.B. per RPM installiert, kein Playwright-eigener Download)
-# Spring Relaxed Binding: BROWSER_EXECUTABLE_PATH → browser.executable.path
-# Pfad anpassen falls die RPM einen anderen Installationspfad verwendet
-ENV BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# Playwright-Browser-Download über den internen Mirror (keine Internet-Verbindung im Pod nötig).
+# Diese Defaults können per OpenShift-ConfigMap überschrieben werden.
+#   PLAYWRIGHT_DOWNLOAD_HOST  → mirror.enabled/host (Chromium-Host wird intern als
+#                               {host}/builds/cft abgeleitet)
+#   PLAYWRIGHT_BROWSERS_PATH  → persistenter Cache (PVC-Mount, Reuse über Pod-Restarts)
+ENV PLAYWRIGHT_MIRROR_ENABLED=true
+ENV PLAYWRIGHT_DOWNLOAD_HOST=http://playwright-mirror:10123
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PLAYWRIGHT_INSTALL_ON_STARTUP=true
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

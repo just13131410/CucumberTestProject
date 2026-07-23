@@ -53,3 +53,7 @@ Thumbs.db
 
 ### Misc ###
 NUL
+/graphify-out/
+/docs/superpowers/
+/.claude/
+/CLAUDE.md

@@ -20,7 +20,7 @@ Funktionalität: Vorgangs-Dashboard
 
   Szenario: Filterung nach Datum (Kalender)
     Gegeben sei ich bin auf dem Dashboard eingeloggt
-    Wenn ich im Filter für das Datum den "1" auswähle
+    Wenn ich im Filter für das Datum "2026-04-01" auswähle
     Und auf den Button "Suche starten" klicke
     Dann sollte die Tabelle Zeilen vom "2026-04-01" anzeigen
 
@@ -72,6 +72,32 @@ Funktionalität: Vorgangs-Dashboard
     Wenn ich im Filter für den Typ "Rechnung" eingebe
     Und auf den Button "Suche starten" klicke
     Dann sollte der Paginator wieder bei der ersten Seite beginnen
+
+  @negativ
+  Szenario: Filterung nach UUID ohne Treffer zeigt leere Tabelle
+    Gegeben sei ich bin auf dem Dashboard eingeloggt
+    Wenn ich im Filter für die UUID "00000000-nicht-vorhanden" eingebe
+    Und auf den Button "Suche starten" klicke
+    Dann sollte die Tabelle 0 Zeilen anzeigen
+    Und eine Meldung "Keine Ergebnisse gefunden" sollte sichtbar sein
+
+  @negativ
+  Szenario: Kombinierte Filterung ohne Treffer zeigt leere Tabelle
+    Gegeben sei ich bin auf dem Dashboard eingeloggt
+    Wenn ich im Filter für den Typ "NichtExistierenderTyp" eingebe
+    Und ich im Filter für den Status "NichtExistierenderStatus" eingebe
+    Und auf den Button "Suche starten" klicke
+    Dann sollte die Tabelle 0 Zeilen anzeigen
+    Und eine Meldung "Keine Ergebnisse gefunden" sollte sichtbar sein
+
+  @negativ
+  Szenario: Filter zurücksetzen nach leerer Suche lädt alle Einträge
+    Gegeben sei ich bin auf dem Dashboard eingeloggt
+    Wenn ich im Filter für die UUID "00000000-nicht-vorhanden" eingebe
+    Und auf den Button "Suche starten" klicke
+    Und die Tabelle 0 Zeilen anzeigt
+    Und ich den Filter zurücksetze
+    Dann sollte die Tabelle wieder mindestens eine Zeile mit Daten enthalten
 
   @negativ
   Szenario: Massenbearbeitung von Vorgängen

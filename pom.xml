@@ -435,6 +435,10 @@
                 <exclude>org/example/App*</exclude>
                 <!-- CucumberRunnerService: invokes Cucumber CLI, requires full runtime -->
                 <exclude>org/example/CucumberRunnerService*</exclude>
+                <!-- CucumberInvoker: gleiche Begruendung wie CucumberRunnerService, ruft Main.run() auf -->
+                <exclude>org/example/CucumberInvoker*</exclude>
+                <!-- CucumberRunnerMain: Prozess-Einstiegspunkt (main()/System.exit), nicht unit-testbar -->
+                <exclude>org/example/CucumberRunnerMain*</exclude>
                 <!-- TestExecutionService: Cucumber-invocation paths only coverable via integration tests -->
                 <exclude>org/example/cucumber/service/**</exclude>
               </excludes>

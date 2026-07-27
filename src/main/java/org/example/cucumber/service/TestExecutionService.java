@@ -9,6 +9,10 @@ import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.zephyr.ZephyrScaleService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -29,28 +33,76 @@ import java.util.stream.Stream;
 @Service
 public class TestExecutionService {
 
-    private static final int MAX_CONCURRENT_RUNS = 5;
+    /**
+     * Max. gleichzeitig laufende Runs. Default 1: In-Process-Ausführung teilt eine JVM; >1
+     * gleichzeitige Runs sprengen auf kleinen Pods den Native-Speicher (OOMKill) UND korrumpieren
+     * sich über den prozessweiten Allure-Singleton gegenseitig. >1 ist erst mit Out-of-Process-
+     * Isolation (Subprozess) daten-korrekt. Über {@code test.execution.max-concurrent-runs} steuerbar.
+     */
+    private final int maxConcurrentRuns;
+    /** Begrenzte Warteschlange für echte Backpressure. {@code test.execution.max-queue-size}. */
+    private final int maxQueueSize;
+    /** Abgeschlossene Runs älter als N Stunden werden aus dem Speicher evictet (0 = nie via TTL). */
+    private final long statusRetentionHours;
+    /** Obergrenze der im Speicher gehaltenen Run-Status (verhindert unbegrenztes Wachstum). */
+    private final int statusMaxEntries;
+
+    /** Blockiert die Menge der verbotenen System-Property-Präfixe aus Request-Env-Variablen. */
+    private static final List<String> BLOCKED_PROP_PREFIXES =
+            List.of("java.", "sun.", "os.", "user.", "spring.", "management.", "server.");
 
     private final CucumberRunnerService cucumberRunnerService;
     private final ZephyrScaleService zephyrScaleService;
-    private final ExecutorService executor;
+    private final RunPersistenceService persistence;
+    private final ThreadPoolExecutor executor;
+    /** Dedizierter Single-Thread-Executor für die CPU-/Native-lastige Allure-Report-Generierung. */
+    private final ExecutorService reportExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "allure-report-generator");
+        t.setDaemon(true);
+        return t;
+    });
     private final Map<UUID, TestStatus> statusMap = new ConcurrentHashMap<>();
     private final Map<UUID, Future<?>> runningFutures = new ConcurrentHashMap<>();
-    private final Semaphore concurrencyLimiter = new Semaphore(MAX_CONCURRENT_RUNS);
 
+    /** Spring-Konstruktor: Concurrency, Queue-Größe und Eviction über Properties konfigurierbar. */
+    @Autowired
     public TestExecutionService(CucumberRunnerService cucumberRunnerService,
-                                ZephyrScaleService zephyrScaleService) {
+                                ZephyrScaleService zephyrScaleService,
+                                RunPersistenceService persistence,
+                                @Value("${test.execution.max-concurrent-runs:1}") int maxConcurrentRuns,
+                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize,
+                                @Value("${test.execution.status-retention-hours:24}") long statusRetentionHours,
+                                @Value("${test.execution.status-max-entries:500}") int statusMaxEntries) {
         this.cucumberRunnerService = cucumberRunnerService;
         this.zephyrScaleService = zephyrScaleService;
-        this.executor = Executors.newFixedThreadPool(MAX_CONCURRENT_RUNS, r -> {
-            Thread t = new Thread(r);
-            t.setName("test-executor-" + t.getId());
-            t.setDaemon(true);
-            return t;
-        });
+        this.persistence = persistence;
+        this.maxConcurrentRuns = Math.max(1, maxConcurrentRuns);
+        this.maxQueueSize = Math.max(1, maxQueueSize);
+        this.statusRetentionHours = statusRetentionHours;
+        this.statusMaxEntries = Math.max(1, statusMaxEntries);
+        // Begrenzte Queue → submit() wirft RejectedExecutionException bei Überlast → echtes 429.
+        this.executor = new ThreadPoolExecutor(
+                this.maxConcurrentRuns, this.maxConcurrentRuns,
+                0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(this.maxQueueSize),
+                r -> {
+                    Thread t = new Thread(r);
+                    t.setName("test-executor-" + t.getId());
+                    t.setDaemon(true);
+                    return t;
+                });
+    }
+
+    /** Backward-compatible Konstruktor (Unit-Tests): Defaults, N=1. */
+    public TestExecutionService(CucumberRunnerService cucumberRunnerService,
+                                ZephyrScaleService zephyrScaleService) {
+        this(cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 20, 24, 500);
     }
 
     public TestExecutionResponse queueTestExecution(TestExecutionRequest request) {
+        // Opportunistische Eviction alter Run-Status, damit statusMap nicht unbegrenzt wächst.
+        evictOldStatuses();
+
         UUID runId = UUID.randomUUID();
         String tagsExpression = buildTagsExpression(request.getTags());
         String features = request.getFeatures() != null
@@ -66,8 +118,18 @@ public class TestExecutionService {
                 .build();
         statusMap.put(runId, status);
 
-        // Submit async execution
-        Future<?> future = executor.submit(() -> executeTest(runId, tagsExpression, features, request));
+        // Admission Control: bei erschöpfter Kapazität (laufend + begrenzte Queue) sofort ablehnen.
+        Future<?> future;
+        try {
+            future = executor.submit(() -> executeTest(runId, tagsExpression, features, request));
+        } catch (RejectedExecutionException e) {
+            statusMap.remove(runId);
+            int capacity = maxConcurrentRuns + maxQueueSize;
+            log.warn("Kapazität erschöpft, Run abgelehnt (max-concurrent={}, max-queue={})",
+                    maxConcurrentRuns, maxQueueSize);
+            throw new CapacityExceededException(
+                    "Zu viele gleichzeitige/wartende Test-Läufe (Kapazität " + capacity + ")");
+        }
         runningFutures.put(runId, future);
 
         log.info("Test execution queued: runId={}, tags={}, environment={}",
@@ -86,29 +148,12 @@ public class TestExecutionService {
 
     private void executeTest(UUID runId, String tags, String features, TestExecutionRequest request) {
         try {
-            // Acquire concurrency permit (blocks if at max)
-            concurrencyLimiter.acquire();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            updateStatus(runId, "CANCELLED", "Interrupted while waiting in queue");
-            return;
-        }
-
-        try {
             updateStatus(runId, "RUNNING", null);
             statusMap.get(runId).setStartTime(LocalDateTime.now());
             statusMap.get(runId).setCurrentPhase("EXECUTING");
 
-            // Set environment variables from request
-            if (request.getEnvironmentVariables() != null) {
-                request.getEnvironmentVariables().forEach(System::setProperty);
-            }
-            if (request.getBrowser() != null) {
-                System.setProperty("browser", request.getBrowser());
-            }
-            if (request.getHeadless() != null) {
-                System.setProperty("browser.headless", request.getHeadless().toString());
-            }
+            // Run-spezifische System-Properties setzen; vorherige Werte für sauberes Restore merken.
+            Map<String, String> previousProps = applyRunProperties(request);
 
             // Count expected scenarios for progress tracking (best-effort, tag-unaware)
             int totalScenarios = countScenariosInFeatures();
@@ -140,6 +185,8 @@ public class TestExecutionService {
                 result = cucumberRunnerService.run(runId.toString(), tags, features);
             } finally {
                 progressTracker.shutdownNow();
+                // Properties nicht in Folge-Runs durchsickern lassen.
+                restoreRunProperties(previousProps);
             }
 
             TestStatus status = statusMap.get(runId);
@@ -149,8 +196,9 @@ public class TestExecutionService {
             status.setProgress(100);
             status.setCurrentPhase("COMPLETED");
 
-            // Build report URLs – einheitlich als /reports/** Direktpfade
-            Map<String, String> reportUrls = new HashMap<>();
+            // Build report URLs – einheitlich als /reports/** Direktpfade.
+            // ConcurrentHashMap: die Allure-URL wird später vom reportExecutor-Thread ergänzt.
+            Map<String, String> reportUrls = new ConcurrentHashMap<>();
             reportUrls.put("cucumber-report", "/reports/" + runId + "/cucumber-reports/Cucumber.html");
 
             // Accessibility report only for runs that include Frontend/UI tests
@@ -174,22 +222,158 @@ public class TestExecutionService {
             // Write executor.json for Allure (enables executor widget and trends in combined reports)
             writeExecutorJson(runId, request);
 
-            // Auto-generate Allure report so the URL is immediately accessible
-            generateAllureReport(runId).ifPresent(url -> reportUrls.put("allure", url));
-            status.setReportUrls(reportUrls);
+            // Terminal-Status persistieren (übersteht Pod-Restarts; Reconcile beim Start liest ihn).
+            persistence.saveStatus(runId, status);
 
-            // Upload results to Zephyr Scale / create Jira ticket (no-op if disabled)
+            // Integration über eine Outbox: vor dem Upload festhalten, nach Erfolg löschen → ein
+            // Restart mitten in der Integration führt zu Replay (at-least-once) statt Datenverlust.
+            persistence.writeOutbox(runId, request, result.exitCode());
             zephyrScaleService.uploadRunResults(runId, request, result.exitCode(), status);
+            persistence.deleteOutbox(runId);
+            persistence.saveStatus(runId, status); // Status inkl. Zephyr/Jira-Metadaten aktualisieren
+
+            // Allure-Report NICHT auf dem Ausführungs-Thread generieren (Freemarker + Asset-Kopien
+            // sind CPU-/Native-lastig) → in dedizierten Single-Thread-Executor auslagern.
+            final TestStatus finalStatus = status;
+            reportExecutor.submit(() -> generateAllureReport(runId).ifPresent(url -> {
+                Map<String, String> urls = finalStatus.getReportUrls();
+                if (urls != null) urls.put("allure", url);
+                persistence.saveStatus(runId, finalStatus);
+            }));
 
             log.info("Test execution finished: runId={}, exitCode={}", runId, result.exitCode());
 
         } catch (Exception e) {
             log.error("Test execution error: runId={}", runId, e);
             updateStatus(runId, "FAILED", e.getMessage());
-            statusMap.get(runId).setEndTime(LocalDateTime.now());
+            TestStatus st = statusMap.get(runId);
+            if (st != null) {
+                st.setEndTime(LocalDateTime.now());
+                persistence.saveStatus(runId, st);
+            }
         } finally {
-            concurrencyLimiter.release();
             runningFutures.remove(runId);
+        }
+    }
+
+    /**
+     * Setzt run-spezifische System-Properties (Browser, Headless, whitelisted Request-Env-Variablen)
+     * und liefert einen Snapshot der vorherigen Werte für {@link #restoreRunProperties}. Verhindert,
+     * dass Properties eines Laufs in Folge-Läufe durchsickern (globaler Zustand). Sensible
+     * JVM-/Framework-Präfixe werden abgelehnt.
+     *
+     * @return Map key → vorheriger Wert (null-Wert bedeutet: Property war vorher nicht gesetzt)
+     */
+    private Map<String, String> applyRunProperties(TestExecutionRequest request) {
+        Map<String, String> toSet = new LinkedHashMap<>();
+        if (request.getEnvironmentVariables() != null) {
+            request.getEnvironmentVariables().forEach((k, v) -> {
+                if (k == null || v == null) return;
+                String lower = k.toLowerCase();
+                if (BLOCKED_PROP_PREFIXES.stream().anyMatch(lower::startsWith)) {
+                    log.warn("Ignoriere nicht erlaubte System-Property aus Request: {}", k);
+                    return;
+                }
+                toSet.put(k, v);
+            });
+        }
+        if (request.getBrowser() != null) {
+            toSet.put("browser", request.getBrowser());
+        }
+        if (request.getHeadless() != null) {
+            toSet.put("browser.headless", request.getHeadless().toString());
+        }
+
+        Map<String, String> previous = new HashMap<>();
+        toSet.forEach((k, v) -> {
+            previous.put(k, System.getProperty(k)); // kann null sein
+            System.setProperty(k, v);
+        });
+        return previous;
+    }
+
+    /** Stellt die vor dem Lauf gesetzten System-Properties wieder her (null = löschen). */
+    private void restoreRunProperties(Map<String, String> previous) {
+        if (previous == null) return;
+        previous.forEach((k, old) -> {
+            if (old == null) {
+                System.clearProperty(k);
+            } else {
+                System.setProperty(k, old);
+            }
+        });
+    }
+
+    /**
+     * Beim App-Start: persistierte Run-Status wieder in den Speicher laden (Historie überlebt
+     * Restart), nicht abgeschlossene Läufe als {@code INTERRUPTED} markieren und offene
+     * Integrations-Outbox-Einträge nachholen (at-least-once Zephyr/Jira-Upload).
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void reconcileAfterRestart() {
+        try {
+            for (TestStatus s : persistence.loadAllStatuses()) {
+                if (s == null || s.getRunId() == null) continue;
+                if (!isTerminal(s.getStatus())) {
+                    s.setStatus("INTERRUPTED");
+                    s.setErrorMessage("Service wurde während des Laufs neu gestartet");
+                    if (s.getEndTime() == null) s.setEndTime(LocalDateTime.now());
+                    persistence.saveStatus(s.getRunId(), s);
+                }
+                statusMap.putIfAbsent(s.getRunId(), s);
+            }
+            for (RunPersistenceService.OutboxEntry e : persistence.loadOutboxes()) {
+                try {
+                    UUID rid = UUID.fromString(e.runId());
+                    TestStatus st = statusMap.get(rid);
+                    zephyrScaleService.uploadRunResults(rid, e.request(), e.exitCode(), st);
+                    persistence.deleteOutbox(rid);
+                    if (st != null) persistence.saveStatus(rid, st);
+                    log.info("Integrations-Outbox nachgeholt: runId={}", rid);
+                } catch (Exception ex) {
+                    log.warn("Outbox-Replay fehlgeschlagen für {}: {}", e.runId(), ex.getMessage());
+                }
+            }
+            evictOldStatuses();
+        } catch (Exception e) {
+            log.warn("Reconcile beim Start übersprungen: {}", e.getMessage());
+        }
+    }
+
+    /** True für Endzustände, deren Status evictbar ist. */
+    private static boolean isTerminal(String status) {
+        return "COMPLETED".equals(status) || "FAILED".equals(status)
+                || "CANCELLED".equals(status) || "INTERRUPTED".equals(status);
+    }
+
+    /**
+     * Entfernt abgeschlossene Run-Status aus dem Speicher: erst per TTL (älter als
+     * {@code statusRetentionHours}), dann per Größen-Cap ({@code statusMaxEntries}, ältester zuerst).
+     * Laufende/wartende Runs bleiben unangetastet. Best-effort, wirft nie.
+     */
+    private void evictOldStatuses() {
+        try {
+            if (statusRetentionHours > 0) {
+                Instant cutoff = Instant.now().minus(Duration.ofHours(statusRetentionHours));
+                statusMap.entrySet().removeIf(e -> {
+                    TestStatus s = e.getValue();
+                    if (!isTerminal(s.getStatus()) || s.getEndTime() == null) return false;
+                    return s.getEndTime().atZone(ZoneId.systemDefault()).toInstant().isBefore(cutoff);
+                });
+            }
+            int overflow = statusMap.size() - statusMaxEntries;
+            if (overflow > 0) {
+                statusMap.entrySet().stream()
+                        .filter(e -> isTerminal(e.getValue().getStatus()))
+                        .sorted(Comparator.comparing(e ->
+                                Optional.ofNullable(e.getValue().getEndTime()).orElse(LocalDateTime.MIN)))
+                        .limit(overflow)
+                        .map(Map.Entry::getKey)
+                        .toList()
+                        .forEach(statusMap::remove);
+            }
+        } catch (Exception e) {
+            log.debug("Status-Eviction übersprungen: {}", e.getMessage());
         }
     }
 
@@ -325,7 +509,8 @@ public class TestExecutionService {
                 "runningRuns", running,
                 "queuedRuns", queued,
                 "successRate", total > 0 ? (completed * 100.0 / total) : 0.0,
-                "maxConcurrentRuns", MAX_CONCURRENT_RUNS
+                "maxConcurrentRuns", maxConcurrentRuns,
+                "maxQueueSize", maxQueueSize
         );
     }
 
@@ -657,5 +842,6 @@ public class TestExecutionService {
     @PreDestroy
     public void shutdown() {
         executor.shutdownNow();
+        reportExecutor.shutdownNow();
     }
 }

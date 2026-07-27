@@ -1,0 +1,8 @@
+# Generische Kubernetes-Manifeste für Rancher Desktop (k3s) – privates K8s statt OpenShift.
+# WireMock mockt die Zephyr-ATM-v1- und Jira-v2-API; die Test-App spielt Ergebnisse dagegen ein.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-automation
+  labels:
+    app: cucumber-test-service

@@ -1,88 +1,135 @@
 package org.example;
 
-import io.cucumber.core.cli.Main;
-import io.qameta.allure.Allure;
-import io.qameta.allure.AllureLifecycle;
-import io.qameta.allure.FileSystemResultsWriter;
-import org.example.cucumber.context.TestContext;
+import lombok.extern.slf4j.Slf4j;
+import org.example.utils.TestResultPaths;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
 public class CucumberRunnerService {
+
+    /** Exit-Code, den der Service für einen wegen Timeout hart beendeten Subprozess-Lauf meldet. */
+    static final int TIMEOUT_EXIT_CODE = 124;
+
+    /**
+     * Ausführungsmodus: {@code subprocess} (Default in Produktion, je Lauf eine eigene JVM →
+     * Fault-Isolation, kein Native-/Metaspace-Akkumulieren im Server) oder {@code in-process}
+     * (gleiche JVM, historischer Default für lokale Läufe/Tests). Über {@code test.execution.mode}.
+     */
+    @Value("${test.execution.mode:in-process}")
+    private String executionMode = "in-process";
+
+    /** Harte Obergrenze pro Subprozess-Lauf; danach {@code destroyForcibly} (fixt hängende Cancels). */
+    @Value("${test.execution.subprocess-timeout-seconds:1800}")
+    private long subprocessTimeoutSeconds = 1800;
+
+    /** Zusätzliche JVM-Flags für den Kind-Prozess (z.B. Heap-/Metaspace-Caps), leer = keine. */
+    @Value("${test.execution.subprocess-jvm-args:}")
+    private String subprocessJvmArgs = "";
 
     public RunResult runByLabel(String label) throws Exception {
         String normalizedLabel = normalizeLabel(label);
         String runId = UUID.randomUUID().toString();
-        return executeRun(runId, normalizedLabel, null);
+        return dispatch(runId, normalizedLabel, null);
     }
 
     public RunResult runByLabel(String runId, String label) throws Exception {
         String normalizedLabel = normalizeLabel(label);
-        return executeRun(runId, normalizedLabel, null);
+        return dispatch(runId, normalizedLabel, null);
     }
 
     public RunResult run(String runId, String tags, String features) throws Exception {
         String normalizedTags = (tags != null && !tags.isBlank()) ? normalizeLabel(tags) : null;
-        return executeRun(runId, normalizedTags, features);
+        return dispatch(runId, normalizedTags, features);
     }
 
-    private RunResult executeRun(String runId, String tags, String features) throws Exception {
-        // Initialize per-run context (sets up isolated output directories)
-        TestContext.init(runId);
-        try {
-            Path runRoot = TestContext.getOutputBase();
-            Path allureResults = TestContext.getAllureResultsDir();
-            Path cucumberReports = TestContext.getCucumberReportsDir();
-            Path screenshotsDir = TestContext.getScreenshotsDir();
-            Path axeResultDir = TestContext.getAxeResultDir();
+    /** Wählt Ausführungsmodus und delegiert. */
+    private RunResult dispatch(String runId, String tags, String features) throws Exception {
+        if ("subprocess".equalsIgnoreCase(executionMode)) {
+            return executeInSubprocess(runId, tags, features);
+        }
+        return executeInProcess(runId, tags, features);
+    }
 
-            // Create all output directories
-            Files.createDirectories(runRoot);
-            Files.createDirectories(allureResults);
-            Files.createDirectories(cucumberReports);
-            Files.createDirectories(screenshotsDir);
-            Files.createDirectories(axeResultDir);
+    /** In-Process-Ausführung in der aktuellen JVM (historisches Verhalten). */
+    private RunResult executeInProcess(String runId, String tags, String features) throws Exception {
+        int exitCode = CucumberInvoker.invoke(runId, tags, features);
+        return new RunResult(runId, tags, exitCode, TestResultPaths.forRun(runId).toString());
+    }
 
-            // Reset Allure lifecycle with the correct output directory for this run.
-            // The AllureLifecycle is a singleton that caches its writer on first init,
-            // so we must replace it before each run to write to the new runId directory.
-            System.setProperty("allure.results.directory", allureResults.toString());
-            Allure.setLifecycle(new AllureLifecycle(new FileSystemResultsWriter(allureResults)));
+    /**
+     * Out-of-Process-Ausführung: startet {@link CucumberRunnerMain} in einer eigenen JVM mit gleichem
+     * Klassenpfad, reicht ergebnisrelevante System-Properties und die komplette Umgebung durch,
+     * streamt Ausgaben in {@code <runDir>/runner.log} und erzwingt bei Timeout {@code destroyForcibly}.
+     */
+    RunResult executeInSubprocess(String runId, String tags, String features) throws Exception {
+        Path runDir = TestResultPaths.forRun(runId);
+        Files.createDirectories(runDir);
+        Path logFile = runDir.resolve("runner.log");
 
-            // Build Cucumber CLI arguments
-            var argsList = new java.util.ArrayList<String>();
-            argsList.add("--glue");
-            argsList.add("org.example");
-            argsList.add("--plugin");
-            argsList.add("pretty");
-            argsList.add("--plugin");
-            argsList.add("json:" + cucumberReports.resolve("Cucumber.json"));
-            argsList.add("--plugin");
-            argsList.add("html:" + cucumberReports.resolve("Cucumber.html"));
-            argsList.add("--plugin");
-            argsList.add("io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm");
+        List<String> cmd = buildSubprocessCommand(runId, tags, features);
+        log.info("Starte Cucumber-Subprozess: runId={}, timeout={}s, log={}",
+                runId, subprocessTimeoutSeconds, logFile);
+        log.debug("Subprozess-Kommando: {}", String.join(" ", cmd));
 
-            if (tags != null && !tags.isBlank()) {
-                argsList.add("--tags");
-                argsList.add(tags);
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        pb.redirectOutput(logFile.toFile());
+        // Umgebung (TEST_RESULTS_PATH, PLAYWRIGHT_*, CONFIG etc.) wird von ProcessBuilder geerbt.
+
+        Process process = pb.start();
+        boolean finished = process.waitFor(subprocessTimeoutSeconds, TimeUnit.SECONDS);
+        int exitCode;
+        if (!finished) {
+            log.warn("Subprozess-Timeout ({}s) für runId={} – erzwinge Abbruch", subprocessTimeoutSeconds, runId);
+            process.destroyForcibly();
+            process.waitFor(30, TimeUnit.SECONDS);
+            exitCode = TIMEOUT_EXIT_CODE;
+        } else {
+            exitCode = process.exitValue();
+        }
+        log.info("Cucumber-Subprozess beendet: runId={}, exitCode={}", runId, exitCode);
+        return new RunResult(runId, tags, exitCode, runDir.toString());
+    }
+
+    /** Baut das {@code java ... CucumberRunnerMain}-Kommando für den Kind-Prozess. */
+    List<String> buildSubprocessCommand(String runId, String tags, String features) {
+        String javaBin = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
+        String classpath = System.getProperty("java.class.path");
+
+        List<String> cmd = new ArrayList<>();
+        cmd.add(javaBin);
+        if (subprocessJvmArgs != null && !subprocessJvmArgs.isBlank()) {
+            for (String arg : subprocessJvmArgs.trim().split("\\s+")) {
+                cmd.add(arg);
             }
+        }
+        // Ergebnisrelevante System-Properties an die Kind-JVM weiterreichen.
+        forwardProperty(cmd, "test.results.path");
+        forwardProperty(cmd, "browser");
+        forwardProperty(cmd, "browser.headless");
+        cmd.add("-cp");
+        cmd.add(classpath);
+        cmd.add(CucumberRunnerMain.class.getName());
+        cmd.add(runId);
+        cmd.add(tags == null ? "null" : tags);
+        cmd.add(features == null ? "null" : features);
+        return cmd;
+    }
 
-            // Feature path: specific features or default classpath
-            if (features != null && !features.isBlank()) {
-                argsList.add(features);
-            } else {
-                argsList.add("classpath:features");
-            }
-
-            String[] args = argsList.toArray(new String[0]);
-            int exitCode = Main.run(args, Thread.currentThread().getContextClassLoader());
-            return new RunResult(runId, tags, exitCode, runRoot.toString());
-        } finally {
-            TestContext.clear();
+    private void forwardProperty(List<String> cmd, String key) {
+        String value = System.getProperty(key);
+        if (value != null && !value.isBlank()) {
+            cmd.add("-D" + key + "=" + value);
         }
     }
 

@@ -50,6 +50,9 @@ public class DashboardSteps extends BasePage {
         if (browser != null) {
             browser.close();
         }
+        if (playwright != null) {
+            playwright.close();
+        }
     }
 
     @Gegebensei("ich öffne die Login-Seite")

@@ -1,0 +1,83 @@
+# WireMock-Server: mockt Zephyr-ATM-v1 + Jira-v2. Request-Journal unter /__admin/requests,
+# Swagger-Admin-UI unter /__admin/docs/. (Eigene GUI folgt später.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wiremock
+  namespace: test-automation
+  labels:
+    app: wiremock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wiremock
+  template:
+    metadata:
+      labels:
+        app: wiremock
+    spec:
+      containers:
+        - name: wiremock
+          image: wiremock/wiremock:3.13.2
+          args: ["--verbose", "--global-response-templating", "--disable-banner"]
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /__admin/mappings
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: mappings
+              mountPath: /home/wiremock/mappings
+              readOnly: true
+      volumes:
+        - name: mappings
+          configMap:
+            name: wiremock-mappings
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wiremock
+  namespace: test-automation
+  labels:
+    app: wiremock
+spec:
+  selector:
+    app: wiremock
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+# Optionaler Ingress (Traefik in Rancher Desktop). Zugriff sonst per port-forward.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wiremock
+  namespace: test-automation
+  labels:
+    app: wiremock
+spec:
+  rules:
+    - host: wiremock.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wiremock
+                port:
+                  number: 8080

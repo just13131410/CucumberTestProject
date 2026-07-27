@@ -112,6 +112,16 @@ public class DashboardSteps extends BasePage {
         page.locator("mat-form-field").filter(new Locator.FilterOptions().setHasText("UUID")).locator("input").fill(uuid);
     }
 
+    @Wenn("ich im Filter für die UUID-Präfix des ersten Eintrags eingebe")
+    public void ich_im_filter_fuer_die_uuid_praefix_des_ersten_eintrags_eingebe() {
+        // Testdaten enthalten pro Lauf zufaellig generierte UUIDs (kein fester Seed) - ein
+        // hartkodierter UUID-Praefix in der Feature-Datei waere daher fragil. Stattdessen wird
+        // der Praefix zur Laufzeit aus der ersten Tabellenzeile gelesen.
+        String uuid = page.locator("table tbody tr").first().locator("td.mat-column-uuid").textContent().trim();
+        String prefix = uuid.split("-")[0];
+        page.locator("mat-form-field").filter(new Locator.FilterOptions().setHasText("UUID")).locator("input").fill(prefix);
+    }
+
     private boolean isValidGuid(String value) {
         return value != null && value.matches(
             "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -265,8 +275,11 @@ public class DashboardSteps extends BasePage {
 
     @Wenn("die Spalte {string} deaktiviere")
     public void die_spalte_deaktiviere(String colLabel) {
-        Locator checkbox = page.locator("mat-checkbox").filter(new Locator.FilterOptions().setHasText(colLabel)).locator("input");
-        checkbox.uncheck(new Locator.UncheckOptions().setForce(true));
+        // Ein forciertes uncheck() auf das rohe <input> umgeht Angulars Event-Binding und
+        // aendert den mdc-checkbox-Zustand nicht zuverlaessig. Ein echter Klick auf das
+        // sichtbare .mdc-checkbox-Element loest Change Detection korrekt aus.
+        Locator matCheckbox = page.locator("mat-checkbox").filter(new Locator.FilterOptions().setHasText(colLabel));
+        matCheckbox.locator(".mdc-checkbox").click();
         page.keyboard().press("Escape");
     }
 
@@ -283,12 +296,14 @@ public class DashboardSteps extends BasePage {
 
     @Dann("sollte ein Dialog mit dem Titel {string} erscheinen")
     public void sollte_ein_dialog_mit_dem_titel_erscheinen(String title) {
-        assertThat(page.locator("h2[mat-dialog-title]")).containsText(title);
+        // Die Detailansicht ist kein MatDialog-Overlay, sondern eine geroutete Seite
+        // (app-vorgang-detail) mit dem Titel in der mat-toolbar, analog zum Dashboard-Titel.
+        assertThat(page.locator("mat-toolbar")).containsText(title);
     }
 
     @Dann("der Dialog sollte die UUID des Vorgangs anzeigen")
     public void der_dialog_sollte_die_uuid_des_vorgangs_anzeigen() {
-        assertThat(page.locator("mat-dialog-content")).containsText("UUID:");
+        assertThat(page.locator(".detail-page")).containsText("UUID:");
     }
 
     @Gegebensei("ich bin nicht eingeloggt")

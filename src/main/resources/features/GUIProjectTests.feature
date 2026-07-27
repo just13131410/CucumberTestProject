@@ -14,7 +14,7 @@ Funktionalität: Vorgangs-Dashboard
 
   Szenario: Filterung nach UUID (Freitext)
     Gegeben sei ich bin auf dem Dashboard eingeloggt
-    Wenn ich im Filter für die UUID "123e4567" eingebe
+    Wenn ich im Filter für die UUID-Präfix des ersten Eintrags eingebe
     Und auf den Button "Suche starten" klicke
     Dann sollte die Tabelle genau 1 Zeile anzeigen
 
@@ -79,16 +79,19 @@ Funktionalität: Vorgangs-Dashboard
     Wenn ich im Filter für die UUID "00000000-nicht-vorhanden" eingebe
     Und auf den Button "Suche starten" klicke
     Dann sollte die Tabelle 0 Zeilen anzeigen
-    Und eine Meldung "Keine Ergebnisse gefunden" sollte sichtbar sein
+    Und eine Meldung "Keine Daten für den Filter gefunden" sollte sichtbar sein
 
   @negativ
   Szenario: Kombinierte Filterung ohne Treffer zeigt leere Tabelle
+    # Jede reale Typ/Status-Kombination liefert in den Testdaten Treffer (5 Typen x 4 Status x
+    # 6 Zeilen = 120), daher kombiniert dieses Negativ-Szenario einen realen Typ mit einer
+    # garantiert nicht existierenden UUID, um deterministisch 0 Treffer zu erzwingen.
     Gegeben sei ich bin auf dem Dashboard eingeloggt
-    Wenn ich im Filter für den Typ "NichtExistierenderTyp" eingebe
-    Und ich im Filter für den Status "NichtExistierenderStatus" eingebe
+    Wenn ich im Filter für den Typ "Rechnung" eingebe
+    Und ich im Filter für die UUID "00000000-nicht-vorhanden" eingebe
     Und auf den Button "Suche starten" klicke
     Dann sollte die Tabelle 0 Zeilen anzeigen
-    Und eine Meldung "Keine Ergebnisse gefunden" sollte sichtbar sein
+    Und eine Meldung "Keine Daten für den Filter gefunden" sollte sichtbar sein
 
   @negativ
   Szenario: Filter zurücksetzen nach leerer Suche lädt alle Einträge

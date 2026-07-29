@@ -11,6 +11,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -85,6 +86,42 @@ class CucumberRunnerServiceTest {
     @Test
     void runByLabelWithRunId_NullLabel_ThrowsIllegalArgument() {
         assertThrows(IllegalArgumentException.class, () -> service.runByLabel("run-123", null));
+    }
+
+    // --- Phase 3: Out-of-Process (Subprozess) Kommando-Bau ---
+
+    @Test
+    void buildSubprocessCommand_ContainsJavaMainAndPositionalArgs() {
+        List<String> cmd = service.buildSubprocessCommand("run-42", "@smoke or @api", "classpath:features");
+
+        assertTrue(cmd.get(0).contains("java"), "erstes Element muss der java-Launcher sein");
+        assertTrue(cmd.contains("-cp"), "muss den Klassenpfad übergeben");
+        int idx = cmd.indexOf("org.example.CucumberRunnerMain");
+        assertTrue(idx > 0, "Main-Klasse muss im Kommando stehen");
+        assertEquals("run-42", cmd.get(idx + 1));
+        assertEquals("@smoke or @api", cmd.get(idx + 2));
+        assertEquals("classpath:features", cmd.get(idx + 3));
+    }
+
+    @Test
+    void buildSubprocessCommand_NullTagsAndFeatures_PassLiteralNull() {
+        List<String> cmd = service.buildSubprocessCommand("run-1", null, null);
+
+        int idx = cmd.indexOf("org.example.CucumberRunnerMain");
+        assertEquals("null", cmd.get(idx + 2), "tags=null wird als Literal 'null' übergeben");
+        assertEquals("null", cmd.get(idx + 3), "features=null wird als Literal 'null' übergeben");
+    }
+
+    @Test
+    void buildSubprocessCommand_ForwardsTestResultsPathSystemProperty() {
+        System.setProperty("test.results.path", "custom-results-dir");
+        try {
+            List<String> cmd = service.buildSubprocessCommand("run-1", "@x", null);
+            assertTrue(cmd.stream().anyMatch(a -> a.equals("-Dtest.results.path=custom-results-dir")),
+                    "ergebnisrelevante System-Property muss an die Kind-JVM durchgereicht werden");
+        } finally {
+            System.clearProperty("test.results.path");
+        }
     }
 
     @Test

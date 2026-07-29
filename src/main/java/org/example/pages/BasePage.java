@@ -14,6 +14,7 @@ import java.util.Map;
 
 public abstract class BasePage {
 
+    protected Playwright playwright;
     protected Browser browser;
     protected Page page;
 
@@ -44,7 +45,11 @@ public abstract class BasePage {
             createOptions.setEnv(env);
         }
 
-        Playwright playwright = Playwright.create(createOptions);
+        // Als Feld gehalten (nicht lokal!) und in DashboardSteps.tearDown() geschlossen: der
+        // Node.js-Treiberprozess von Playwright.create() überlebt sonst den Test-Run als Zombie
+        // (führte im Lasttest zu 9 verwaisten ~110-Mi-node-Prozessen -> RSS über das 2-Gi-Limit -> OOMKill,
+        // unabhaengig von JVM-Heap/Metaspace-Caps, da der Treiber ein eigener Prozess ist).
+        playwright = Playwright.create(createOptions);
         BrowserType browserType = switch (normalized) {
             case "firefox" -> playwright.firefox();
             case "chromium", "chrome" -> playwright.chromium();

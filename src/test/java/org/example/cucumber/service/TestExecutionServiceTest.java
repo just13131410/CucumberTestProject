@@ -15,10 +15,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -699,5 +701,92 @@ class TestExecutionServiceTest {
         assertNotNull(duration);
         assertTrue(duration.matches("\\d{2}:\\d{2}"),
                 "Duration must be in mm:ss format but was: " + duration);
+    }
+
+    // --- Phase 1: Admission Control (429) + Status-Eviction ---
+
+    @SuppressWarnings("unchecked")
+    private Map<UUID, TestStatus> statusMapOf(TestExecutionService svc) throws Exception {
+        Field f = TestExecutionService.class.getDeclaredField("statusMap");
+        f.setAccessible(true);
+        return (Map<UUID, TestStatus>) f.get(svc);
+    }
+
+    private void invokeEvict(TestExecutionService svc) throws Exception {
+        Method m = TestExecutionService.class.getDeclaredMethod("evictOldStatuses");
+        m.setAccessible(true);
+        m.invoke(svc);
+    }
+
+    @Test
+    void queueTestExecution_CapacityExceeded_Throws429Exception() throws Exception {
+        // 1 laufender Slot + Queue-Größe 1 = Kapazität 2; der 3. Run muss abgelehnt werden.
+        TestExecutionService svc = new TestExecutionService(
+                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 1, 24, 500);
+        try {
+            CountDownLatch block = new CountDownLatch(1);
+            when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+                    .thenAnswer(inv -> {
+                        block.await(10, TimeUnit.SECONDS);
+                        return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
+                    });
+
+            TestExecutionRequest req = createRequest("dev", List.of("@smoke"));
+            svc.queueTestExecution(req); // belegt den einen Ausführungs-Thread
+            await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
+                    assertTrue(svc.getActiveTests().stream().anyMatch(s -> "RUNNING".equals(s.getStatus()))));
+            svc.queueTestExecution(req); // füllt die Queue (Größe 1)
+
+            assertThrows(CapacityExceededException.class,
+                    () -> svc.queueTestExecution(req)); // Kapazität erschöpft -> 429
+
+            block.countDown();
+        } finally {
+            svc.shutdown();
+        }
+    }
+
+    @Test
+    void evictOldStatuses_SizeCap_RemovesOldestTerminalOnly() throws Exception {
+        // TTL aus (0), Größen-Cap = 2
+        TestExecutionService svc = new TestExecutionService(
+                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 20, 0, 2);
+        try {
+            Map<UUID, TestStatus> map = statusMapOf(svc);
+            for (int i = 0; i < 4; i++) {
+                UUID id = UUID.randomUUID();
+                map.put(id, TestStatus.builder().runId(id).status("COMPLETED")
+                        .endTime(LocalDateTime.now().minusMinutes(i)).build());
+            }
+            invokeEvict(svc);
+            assertEquals(2, map.size(), "Größen-Cap muss auf 2 reduzieren (älteste zuerst entfernt)");
+        } finally {
+            svc.shutdown();
+        }
+    }
+
+    @Test
+    void evictOldStatuses_TTL_RemovesExpiredButKeepsFreshAndRunning() throws Exception {
+        TestExecutionService svc = new TestExecutionService(
+                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 20, 1, 500);
+        try {
+            Map<UUID, TestStatus> map = statusMapOf(svc);
+            UUID oldId = UUID.randomUUID();
+            map.put(oldId, TestStatus.builder().runId(oldId).status("COMPLETED")
+                    .endTime(LocalDateTime.now().minusHours(2)).build());
+            UUID freshId = UUID.randomUUID();
+            map.put(freshId, TestStatus.builder().runId(freshId).status("COMPLETED")
+                    .endTime(LocalDateTime.now()).build());
+            UUID runningId = UUID.randomUUID();
+            map.put(runningId, TestStatus.builder().runId(runningId).status("RUNNING").build());
+
+            invokeEvict(svc);
+
+            assertFalse(map.containsKey(oldId), "abgelaufener Endzustand muss entfernt werden");
+            assertTrue(map.containsKey(freshId), "frischer Endzustand bleibt");
+            assertTrue(map.containsKey(runningId), "laufender Run wird nie evictet");
+        } finally {
+            svc.shutdown();
+        }
     }
 }

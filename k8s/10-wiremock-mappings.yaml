@@ -1,0 +1,61 @@
+# WireMock-Stub-Mappings für die APIs, die ZephyrScaleClient + JiraClient aufrufen.
+# Wird nach /home/wiremock/mappings gemountet; WireMock lädt beim Start alle *.json.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wiremock-mappings
+  namespace: test-automation
+  labels:
+    app: wiremock
+data:
+  # GET /rest/atm/1.0/folder → leere Liste (zwingt den Service, createFolder aufzurufen)
+  folder-get.json: |
+    {
+      "priority": 5,
+      "request": { "method": "GET", "urlPathPattern": "/rest/atm/1.0/folder.*" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": []
+      }
+    }
+  # POST /rest/atm/1.0/folder → angelegter Ordner mit id
+  folder-post.json: |
+    {
+      "request": { "method": "POST", "urlPath": "/rest/atm/1.0/folder" },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "id": 501, "name": "MockFolder", "projectKey": "QA", "type": "TEST_RUN" }
+      }
+    }
+  # POST /rest/atm/1.0/testrun → angelegter Test-Cycle mit key + id
+  testrun-post.json: |
+    {
+      "request": { "method": "POST", "urlPath": "/rest/atm/1.0/testrun" },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "key": "QA-C1", "id": 9001, "name": "Mock Test Cycle" }
+      }
+    }
+  # POST /rest/atm/1.0/testrun/{key}/testresults → Ergebnis-Upload akzeptiert
+  testresults-post.json: |
+    {
+      "request": { "method": "POST", "urlPathPattern": "/rest/atm/1.0/testrun/[^/]+/testresults" },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": [ { "id": 1, "testResultStatus": "Pass" } ]
+      }
+    }
+  # POST /rest/api/2/issue → angelegtes Jira-Ticket
+  jira-issue-post.json: |
+    {
+      "request": { "method": "POST", "urlPath": "/rest/api/2/issue" },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "id": "10001", "key": "QA-1", "self": "http://wiremock:8080/rest/api/2/issue/10001" }
+      }
+    }

@@ -1,0 +1,160 @@
+# cucumber-test-service auf k3s (Rancher Desktop). Integration zeigt auf WireMock statt echtem Jira.
+# Image lokal bauen (siehe README) – kein Registry-Pull, daher imagePullPolicy: IfNotPresent.
+#
+# Phase 0 (docs/lasttest-analyse-und-umsetzungsplan.md): native Speicher-Caps + Guaranteed QoS +
+# entkoppelte Probes, damit ein Testlauf den Pod nicht mehr über das 2-Gi-Limit OOMKillt.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-results-pvc
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cucumber-test-service
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cucumber-test-service
+  template:
+    metadata:
+      labels:
+        app: cucumber-test-service
+    spec:
+      containers:
+        - name: cucumber-test-service
+          image: cucumber-test-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8081
+              name: actuator
+          env:
+            # ---- Integration gegen WireMock ----
+            # dev-Profil setzt integration.mock.enabled=true -> hier überschreiben,
+            # damit echte HTTP-Calls an WireMock gehen (statt simulierter Mock-Werte).
+            - name: INTEGRATION_MOCK_ENABLED
+              value: "false"
+            - name: ZEPHYR_ENABLED
+              value: "true"
+            - name: ZEPHYR_BASE_URL
+              value: "http://wiremock:8080"
+            - name: ZEPHYR_USERNAME
+              value: "mock"
+            - name: ZEPHYR_API_TOKEN
+              value: "mock"
+            - name: ZEPHYR_DEFAULT_PROJECT_KEY
+              value: "QA"
+            - name: JIRA_ENABLED
+              value: "true"
+            - name: JIRA_DEFAULT_ASSIGNEE_ACCOUNT_ID
+              value: "mock"
+            # Todo-API-Fixture für die @API-Test-Szenarien (Service im selben Namespace).
+            - name: TODOAPIURL
+              value: "http://allure-todo-api:3000"
+            # ---- Ohne Playwright-Browser: für die Integrationsprüfung reichen API-Tests ----
+            - name: PLAYWRIGHT_MIRROR_ENABLED
+              value: "false"
+            - name: PLAYWRIGHT_INSTALL_ON_STARTUP
+              value: "false"
+            - name: MANAGEMENT_SERVER_PORT
+              value: "8081"
+            # ---- Native-Speicher zähmen (glibc-Malloc-Arenen), höchster ROI, risikolos ----
+            - name: MALLOC_ARENA_MAX
+              value: "2"
+            # ---- JVM-Pools deckeln, damit RSS nicht unbeobachtet über das 2-Gi-Limit wächst ----
+            # Budget: 640(Heap)+384(Metaspace)+256(CodeCache)+256(Direct)+~68(Stacks)+~80(GC) ≈ 1684 Mi < 2048 Mi.
+            # -Xmx statt MaxRAMPercentage: mehr Heap-% würde Native aushungern und trotzdem OOMen.
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -Xms256m -Xmx640m
+                -XX:MaxMetaspaceSize=384m -XX:ReservedCodeCacheSize=256m -XX:MaxDirectMemorySize=256m
+                -Xss512k -XX:+UseG1GC -XX:G1PeriodicGCInterval=30000
+                -XX:ParallelGCThreads=2 -XX:ConcGCThreads=1
+                -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/test-results/dumps
+                -XX:NativeMemoryTracking=summary
+          volumeMounts:
+            - name: test-results
+              mountPath: /app/test-results
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "2Gi"
+              cpu: "2"
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: actuator
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: actuator
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: actuator
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+      volumes:
+        - name: test-results
+          persistentVolumeClaim:
+            claimName: test-results-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cucumber-test-service
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  selector:
+    app: cucumber-test-service
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cucumber-test-service
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  rules:
+    - host: cucumber.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cucumber-test-service
+                port:
+                  number: 8080

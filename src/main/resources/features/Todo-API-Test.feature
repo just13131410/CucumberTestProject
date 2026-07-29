@@ -1,4 +1,4 @@
-@Backend @API-Test
+@API-Test
 Feature: Todo API - Authentifizierung und CRUD-Operationen
 
   Background:

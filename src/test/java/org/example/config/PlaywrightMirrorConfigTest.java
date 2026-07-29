@@ -4,8 +4,21 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class PlaywrightMirrorConfigTest {
+
+    /**
+     * ConfigReader prüft Env-Var vor System-Property (siehe ConfigReader.get()). Ist
+     * PLAYWRIGHT_DOWNLOAD_HOST auf der Maschine gesetzt (z.B. dauerhaft per setx für den lokalen
+     * Playwright-Mirror), gewinnt sie immer gegen die hier per System.setProperty gesetzten
+     * Test-Werte. Die betroffenen Tests prüfen gezielt den Fallback ohne Env-Var und werden dann
+     * übersprungen statt falsch fehlzuschlagen.
+     */
+    private static void assumeNoDownloadHostEnvVar() {
+        assumeTrue(System.getenv("PLAYWRIGHT_DOWNLOAD_HOST") == null,
+                "PLAYWRIGHT_DOWNLOAD_HOST ist auf dieser Maschine gesetzt und hat Vorrang vor System.setProperty");
+    }
 
     @AfterEach
     void clearProps() {
@@ -57,12 +70,14 @@ class PlaywrightMirrorConfigTest {
 
     @Test
     void downloadHost_HonorsSystemProperty() {
+        assumeNoDownloadHostEnvVar();
         System.setProperty("playwright.download.host", "http://custom-mirror:9999");
         assertEquals("http://custom-mirror:9999", PlaywrightMirrorConfig.downloadHost());
     }
 
     @Test
     void chromiumDownloadHost_DerivedFromBaseWithCftPrefix() {
+        assumeNoDownloadHostEnvVar();
         System.setProperty("playwright.download.host", "http://custom-mirror:9999");
         assertEquals("http://custom-mirror:9999/builds/cft",
                 PlaywrightMirrorConfig.chromiumDownloadHost());
@@ -70,6 +85,7 @@ class PlaywrightMirrorConfigTest {
 
     @Test
     void chromiumDownloadHost_StripsTrailingSlashOnBase() {
+        assumeNoDownloadHostEnvVar();
         System.setProperty("playwright.download.host", "http://custom-mirror:9999/");
         assertEquals("http://custom-mirror:9999/builds/cft",
                 PlaywrightMirrorConfig.chromiumDownloadHost());

@@ -4,6 +4,7 @@ import org.example.cucumber.model.CombinedReportRequest;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
+import org.example.cucumber.service.CapacityExceededException;
 import org.example.cucumber.service.TestExecutionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -327,6 +328,17 @@ public class TestExecutionController {
         Object statistics = testExecutionService.getStatistics(environment);
 
         return ResponseEntity.ok(statistics);
+    }
+
+    /**
+     * Übersetzt eine erschöpfte Ausführungskapazität (Concurrency + begrenzte Queue) in HTTP 429,
+     * sodass Aufrufer die Backpressure erkennen und später erneut versuchen können.
+     */
+    @ExceptionHandler(CapacityExceededException.class)
+    public ResponseEntity<Map<String, String>> handleCapacityExceeded(CapacityExceededException e) {
+        log.warn("Test-Ausführung abgelehnt (429): {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(Map.of("error", "capacity_exceeded", "message", e.getMessage()));
     }
 
     private void resolveReportUrls(TestStatus status) {

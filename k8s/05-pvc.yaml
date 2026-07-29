@@ -1,0 +1,15 @@
+# Persistenter Speicher für Test-Ergebnisse + Run-Journal/Outbox (Phase 2: übersteht Pod-Restarts).
+# k3s (Rancher Desktop) bringt den local-path-Provisioner als Default-StorageClass mit.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-results-pvc
+  namespace: test-automation
+  labels:
+    app: cucumber-test-service
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

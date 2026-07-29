@@ -117,6 +117,25 @@ class ConfigReaderTest {
         assertEquals("fallback", result);
     }
 
+    // --- toEnvKey Tests ---
+
+    @Test
+    void toEnvKey_ConvertsDotsToUnderscores() {
+        assertEquals("BASE_URL", ConfigReader.toEnvKey("base.url"));
+    }
+
+    @Test
+    void toEnvKey_ConvertsHyphensToUnderscores() {
+        // Regression: "zephyr.api-token" ergab vorher "ZEPHYR_API-TOKEN" (Bindestrich blieb
+        // erhalten) statt "ZEPHYR_API_TOKEN" - Umgebungsvariable/.env-Eintrag wurden nie gefunden.
+        assertEquals("ZEPHYR_API_TOKEN", ConfigReader.toEnvKey("zephyr.api-token"));
+    }
+
+    @Test
+    void toEnvKey_ConvertsToUpperCase() {
+        assertEquals("APIURL", ConfigReader.toEnvKey("apiURL"));
+    }
+
     // --- loadSecretFiles Tests ---
 
     @Test

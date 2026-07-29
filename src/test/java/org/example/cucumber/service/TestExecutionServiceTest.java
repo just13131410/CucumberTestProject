@@ -1,7 +1,5 @@
 package org.example.cucumber.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.CucumberRunnerService;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
@@ -20,7 +18,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -360,21 +357,13 @@ class TestExecutionServiceTest {
         assertTrue(stagingTotal >= 1);
     }
 
-    // --- getTestReport / generateAllureReport / getReportUrl (non-existing) ---
+    // --- getTestReport / generateAllureReport / getReportUrl / listAvailableRuns /
+    // generateCombinedAllureReport delegieren an AllureReportService (siehe AllureReportServiceTest
+    // fuer Edge-Cases); hier nur ein Smoke-Test, dass die Delegation verdrahtet ist. ---
 
     @Test
-    void getTestReport_NonExistingRun_ReturnsEmpty() {
+    void getTestReport_DelegatesToAllureReportService() {
         assertFalse(testExecutionService.getTestReport(UUID.randomUUID()).isPresent());
-    }
-
-    @Test
-    void generateAllureReport_NonExistingRun_ReturnsEmpty() {
-        assertFalse(testExecutionService.generateAllureReport(UUID.randomUUID()).isPresent());
-    }
-
-    @Test
-    void getReportUrl_NonExistingRun_ReturnsEmpty() {
-        assertFalse(testExecutionService.getReportUrl(UUID.randomUUID()).isPresent());
     }
 
     // --- Features support ---
@@ -399,184 +388,6 @@ class TestExecutionServiceTest {
 
         assertNotNull(response);
         assertEquals("QUEUED", response.getStatus());
-    }
-
-    // --- listAvailableRuns tests ---
-
-    @Test
-    void listAvailableRuns_NoResultsDir_ReturnsEmptyList() {
-        // Default test-results dir doesn't exist in test environment
-        // Use a non-existent path
-        System.setProperty("test.results.path", "non-existent-dir-" + UUID.randomUUID());
-        try {
-            List<UUID> runs = testExecutionService.listAvailableRuns();
-            assertNotNull(runs);
-            assertTrue(runs.isEmpty());
-        } finally {
-            System.clearProperty("test.results.path");
-        }
-    }
-
-    @Test
-    void listAvailableRuns_WithValidRuns_ReturnsUUIDs(@TempDir Path tempDir) throws IOException {
-        UUID run1 = UUID.randomUUID();
-        UUID run2 = UUID.randomUUID();
-
-        // Create run directories with allure-results
-        Files.createDirectories(tempDir.resolve(run1.toString()).resolve("allure-results"));
-        Files.createDirectories(tempDir.resolve(run2.toString()).resolve("allure-results"));
-        // Create a directory without allure-results (should be excluded)
-        Files.createDirectories(tempDir.resolve(UUID.randomUUID().toString()));
-        // Create a non-UUID directory with allure-results (should be excluded)
-        Files.createDirectories(tempDir.resolve("not-a-uuid").resolve("allure-results"));
-
-        System.setProperty("test.results.path", tempDir.toString());
-        try {
-            List<UUID> runs = testExecutionService.listAvailableRuns();
-            assertEquals(2, runs.size());
-            assertTrue(runs.contains(run1));
-            assertTrue(runs.contains(run2));
-        } finally {
-            System.clearProperty("test.results.path");
-        }
-    }
-
-    // --- generateCombinedAllureReport tests ---
-
-    @Test
-    void generateCombinedAllureReport_NoRuns_ReturnsEmpty() {
-        System.setProperty("test.results.path", "non-existent-dir-" + UUID.randomUUID());
-        try {
-            Optional<String> result = testExecutionService.generateCombinedAllureReport(null);
-            assertFalse(result.isPresent());
-        } finally {
-            System.clearProperty("test.results.path");
-        }
-    }
-
-    @Test
-    void generateCombinedAllureReport_NoAllureResultsDirs_ReturnsEmpty(@TempDir Path tempDir) throws IOException {
-        UUID runId = UUID.randomUUID();
-        // Create run directory without allure-results subdirectory
-        Files.createDirectories(tempDir.resolve(runId.toString()));
-
-        System.setProperty("test.results.path", tempDir.toString());
-        try {
-            Optional<String> result = testExecutionService.generateCombinedAllureReport(List.of(runId));
-            assertFalse(result.isPresent());
-        } finally {
-            System.clearProperty("test.results.path");
-        }
-    }
-
-    // --- sortSuitesNewestFirst tests (private method via reflection) ---
-
-    private void sortSuitesNewestFirst(Path reportDir) throws Exception {
-        Method method = TestExecutionService.class.getDeclaredMethod("sortSuitesNewestFirst", Path.class);
-        method.setAccessible(true);
-        method.invoke(testExecutionService, reportDir);
-    }
-
-    @Test
-    void sortSuitesNewestFirst_WidgetAndDataSuites_OrderedNewestFirst(@TempDir Path tempDir) throws Exception {
-        Path widgetsDir = Files.createDirectories(tempDir.resolve("widgets"));
-        Path dataDir = Files.createDirectories(tempDir.resolve("data"));
-
-        Files.writeString(widgetsDir.resolve("suites.json"), """
-                {
-                  "total": 2,
-                  "items": [
-                    {"uid": "a", "name": "202602231349 938da71e @Frontend"},
-                    {"uid": "b", "name": "202607271559 f3dbe6c2 @Backend"}
-                  ]
-                }""");
-        Files.writeString(dataDir.resolve("suites.json"), """
-                {
-                  "uid": "root",
-                  "name": "suites",
-                  "children": [
-                    {"name": "202602231349 938da71e @Frontend", "children": []},
-                    {"name": "202607271559 f3dbe6c2 @Backend", "children": []}
-                  ]
-                }""");
-
-        sortSuitesNewestFirst(tempDir);
-
-        ObjectMapper mapper = new ObjectMapper();
-        JsonNode widgetItems = mapper.readTree(widgetsDir.resolve("suites.json").toFile()).get("items");
-        assertEquals("202607271559 f3dbe6c2 @Backend", widgetItems.get(0).get("name").asText());
-        assertEquals("202602231349 938da71e @Frontend", widgetItems.get(1).get("name").asText());
-
-        JsonNode dataChildren = mapper.readTree(dataDir.resolve("suites.json").toFile()).get("children");
-        assertEquals("202607271559 f3dbe6c2 @Backend", dataChildren.get(0).get("name").asText());
-        assertEquals("202602231349 938da71e @Frontend", dataChildren.get(1).get("name").asText());
-    }
-
-    @Test
-    void sortSuitesNewestFirst_MissingFiles_DoesNotThrow(@TempDir Path tempDir) {
-        assertDoesNotThrow(() -> sortSuitesNewestFirst(tempDir));
-    }
-
-    // --- readTagsFromExecutorJson tests (private method via reflection) ---
-
-    private String readTagsFromExecutorJson(Path dir) throws Exception {
-        Method method = TestExecutionService.class.getDeclaredMethod("readTagsFromExecutorJson", Path.class);
-        method.setAccessible(true);
-        return (String) method.invoke(testExecutionService, dir);
-    }
-
-    @Test
-    void readTagsFromExecutorJson_WithTags_ReturnsTags(@TempDir Path tempDir) throws Exception {
-        String executorJson = """
-                {
-                  "name": "Cucumber Test Service",
-                  "type": "api",
-                  "buildName": "Run 550e8400",
-                  "buildOrder": 1234567890,
-                  "reportName": "Run 550e8400 [dev] @Backend, @smoke",
-                  "reportUrl": "/reports/550e8400/allure-report/index.html"
-                }""";
-        Files.writeString(tempDir.resolve("executor.json"), executorJson);
-
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("@Backend, @smoke", tags);
-    }
-
-    @Test
-    void readTagsFromExecutorJson_WithoutTags_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
-        String executorJson = """
-                {
-                  "name": "Cucumber Test Service",
-                  "type": "api",
-                  "buildName": "Run 550e8400",
-                  "buildOrder": 1234567890,
-                  "reportName": "Run 550e8400 [dev] ",
-                  "reportUrl": "/reports/550e8400/allure-report/index.html"
-                }""";
-        Files.writeString(tempDir.resolve("executor.json"), executorJson);
-
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("", tags);
-    }
-
-    @Test
-    void readTagsFromExecutorJson_NoExecutorFile_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("", tags);
-    }
-
-    @Test
-    void readTagsFromExecutorJson_NoReportNameField_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
-        String executorJson = """
-                {
-                  "name": "Cucumber Test Service",
-                  "type": "api",
-                  "buildName": "Run 550e8400"
-                }""";
-        Files.writeString(tempDir.resolve("executor.json"), executorJson);
-
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("", tags);
     }
 
     // --- reportUrls: accessibility nur für Frontend-Tests ---
@@ -682,26 +493,42 @@ class TestExecutionServiceTest {
                 "Duration must be in mm:ss format but was: " + duration);
     }
 
-    // --- Phase 1: Admission Control (429) + Status-Eviction ---
+    // --- maxConcurrentRuns clamping (System-Property-Mutation ist nur bei 1 gleichzeitigen Run sicher) ---
 
-    @SuppressWarnings("unchecked")
-    private Map<UUID, TestStatus> statusMapOf(TestExecutionService svc) throws Exception {
-        Field f = TestExecutionService.class.getDeclaredField("statusMap");
-        f.setAccessible(true);
-        return (Map<UUID, TestStatus>) f.get(svc);
+    private TestExecutionService newService(int maxConcurrentRuns, int maxQueueSize) {
+        return new TestExecutionService(
+                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
+                new RunStatusRegistry(24, 500), new AllureReportService(), maxConcurrentRuns, maxQueueSize);
     }
 
-    private void invokeEvict(TestExecutionService svc) throws Exception {
-        Method m = TestExecutionService.class.getDeclaredMethod("evictOldStatuses");
-        m.setAccessible(true);
-        m.invoke(svc);
+    @Test
+    void constructor_MaxConcurrentRunsAboveOne_ClampedToOne() {
+        TestExecutionService svc = newService(5, 20);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> stats = (Map<String, Object>) svc.getStatistics(null);
+            assertEquals(1, stats.get("maxConcurrentRuns"));
+        } finally {
+            svc.shutdown();
+        }
+    }
+
+    @Test
+    void constructor_MaxConcurrentRunsZeroOrNegative_ClampedToOne() {
+        TestExecutionService svc = newService(-3, 20);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> stats = (Map<String, Object>) svc.getStatistics(null);
+            assertEquals(1, stats.get("maxConcurrentRuns"));
+        } finally {
+            svc.shutdown();
+        }
     }
 
     @Test
     void queueTestExecution_CapacityExceeded_Throws429Exception() throws Exception {
         // 1 laufender Slot + Queue-Größe 1 = Kapazität 2; der 3. Run muss abgelehnt werden.
-        TestExecutionService svc = new TestExecutionService(
-                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 1, 24, 500);
+        TestExecutionService svc = newService(1, 1);
         try {
             CountDownLatch block = new CountDownLatch(1);
             when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
@@ -720,50 +547,6 @@ class TestExecutionServiceTest {
                     () -> svc.queueTestExecution(req)); // Kapazität erschöpft -> 429
 
             block.countDown();
-        } finally {
-            svc.shutdown();
-        }
-    }
-
-    @Test
-    void evictOldStatuses_SizeCap_RemovesOldestTerminalOnly() throws Exception {
-        // TTL aus (0), Größen-Cap = 2
-        TestExecutionService svc = new TestExecutionService(
-                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 20, 0, 2);
-        try {
-            Map<UUID, TestStatus> map = statusMapOf(svc);
-            for (int i = 0; i < 4; i++) {
-                UUID id = UUID.randomUUID();
-                map.put(id, TestStatus.builder().runId(id).status("COMPLETED")
-                        .endTime(LocalDateTime.now().minusMinutes(i)).build());
-            }
-            invokeEvict(svc);
-            assertEquals(2, map.size(), "Größen-Cap muss auf 2 reduzieren (älteste zuerst entfernt)");
-        } finally {
-            svc.shutdown();
-        }
-    }
-
-    @Test
-    void evictOldStatuses_TTL_RemovesExpiredButKeepsFreshAndRunning() throws Exception {
-        TestExecutionService svc = new TestExecutionService(
-                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 20, 1, 500);
-        try {
-            Map<UUID, TestStatus> map = statusMapOf(svc);
-            UUID oldId = UUID.randomUUID();
-            map.put(oldId, TestStatus.builder().runId(oldId).status("COMPLETED")
-                    .endTime(LocalDateTime.now().minusHours(2)).build());
-            UUID freshId = UUID.randomUUID();
-            map.put(freshId, TestStatus.builder().runId(freshId).status("COMPLETED")
-                    .endTime(LocalDateTime.now()).build());
-            UUID runningId = UUID.randomUUID();
-            map.put(runningId, TestStatus.builder().runId(runningId).status("RUNNING").build());
-
-            invokeEvict(svc);
-
-            assertFalse(map.containsKey(oldId), "abgelaufener Endzustand muss entfernt werden");
-            assertTrue(map.containsKey(freshId), "frischer Endzustand bleibt");
-            assertTrue(map.containsKey(runningId), "laufender Run wird nie evictet");
         } finally {
             svc.shutdown();
         }

@@ -1,24 +1,16 @@
 package org.example.integration.zephyr;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.jira.JiraClient;
 import org.example.integration.model.*;
+import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -34,7 +26,8 @@ public class ZephyrScaleService {
 
     private final ZephyrScaleClient zephyrClient;
     private final JiraClient jiraClient;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final CucumberResultReader cucumberResultReader;
+    private final MockIntegrationService mockIntegrationService;
 
     @Value("${zephyr.enabled:false}")
     private boolean zephyrEnabled;
@@ -54,11 +47,9 @@ public class ZephyrScaleService {
     @Value("${integration.mock.enabled:false}")
     private boolean mockEnabled;
 
-    @Value("${zephyr.base-url:https://jira.yourcompany.com}")
-    private String zephyrBaseUrl;
-
-    @Value("${zephyr.api-token:}")
-    private String zephyrApiToken;
+    // Bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen: Spring's @Value
+    // liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
+    private final String zephyrApiToken = ConfigReader.get("zephyr.api-token", "");
 
     @PostConstruct
     private void validateConfig() {
@@ -84,7 +75,7 @@ public class ZephyrScaleService {
 
         try {
             if (mockEnabled) {
-                simulateResults(runId, request, exitCode, status, projectKey);
+                mockIntegrationService.simulateResults(runId, status, exitCode, projectKey);
                 return;
             }
 
@@ -110,12 +101,12 @@ public class ZephyrScaleService {
             return;
         }
 
-        addMetadata(status, "zephyrCycleKey", cycleKey);
+        StatusMetadataSupport.addMetadata(status, "zephyrCycleKey", cycleKey);
 
-        List<ZephyrTestExecution> executions = buildExecutions(runId, exitCode);
+        List<ZephyrTestExecution> executions = cucumberResultReader.buildExecutions(runId, exitCode);
         if (!executions.isEmpty()) {
             zephyrClient.uploadTestResults(cycleKey, executions);
-            addMetadata(status, "zephyrExecutions", executions.stream()
+            StatusMetadataSupport.addMetadata(status, "zephyrExecutions", executions.stream()
                     .map(ZephyrTestExecution::getTestCaseKey)
                     .collect(Collectors.toList()));
         }
@@ -175,55 +166,6 @@ public class ZephyrScaleService {
         return cycle != null ? cycle.getKey() : null;
     }
 
-    private List<ZephyrTestExecution> buildExecutions(UUID runId, int exitCode) {
-        Path cucumberJson = getResultsBasePath(runId).resolve("cucumber-reports").resolve("Cucumber.json");
-        if (Files.exists(cucumberJson)) {
-            List<ZephyrTestExecution> detailed = parseDetailedExecutions(cucumberJson);
-            if (!detailed.isEmpty()) {
-                return detailed;
-            }
-        }
-        return List.of(ZephyrTestExecution.builder()
-                .testCaseKey(runId.toString().substring(0, 8))
-                .statusName(exitCode == 0 ? "Pass" : "Fail")
-                .comment("Run: " + runId)
-                .build());
-    }
-
-    private List<ZephyrTestExecution> parseDetailedExecutions(Path cucumberJson) {
-        try {
-            List<CucumberFeature> features = objectMapper.readValue(
-                    cucumberJson.toFile(), new TypeReference<>() {});
-            List<ZephyrTestExecution> executions = new ArrayList<>();
-            for (CucumberFeature feature : features) {
-                if (feature.getElements() == null) continue;
-                for (CucumberElement element : feature.getElements()) {
-                    String testCaseKey = extractTestCaseKey(element.getTags());
-                    if (testCaseKey == null) continue;
-                    boolean allPassed = element.getSteps() != null && element.getSteps().stream()
-                            .allMatch(s -> s.getResult() != null && "passed".equals(s.getResult().getStatus()));
-                    executions.add(ZephyrTestExecution.builder()
-                            .testCaseKey(testCaseKey)
-                            .statusName(allPassed ? "Pass" : "Fail")
-                            .build());
-                }
-            }
-            return executions;
-        } catch (IOException e) {
-            log.warn("Failed to parse Cucumber JSON at {}: {}", cucumberJson, e.getMessage());
-            return List.of();
-        }
-    }
-
-    private String extractTestCaseKey(List<CucumberTag> tags) {
-        if (tags == null) return null;
-        return tags.stream()
-                .filter(t -> t.getName() != null && t.getName().startsWith("@T-"))
-                .map(t -> t.getName().substring(1))
-                .findFirst()
-                .orElse(null);
-    }
-
     private void createJiraTicket(UUID runId, TestExecutionRequest request,
                                   String projectKey, TestStatus status) {
         String tags = request.getTags() != null ? String.join(", ", request.getTags()) : "";
@@ -249,108 +191,7 @@ public class ZephyrScaleService {
             if (status != null) {
                 status.setJiraTicketKey(issue.getKey());
             }
-            addMetadata(status, "jiraTicket", issue.getKey());
+            StatusMetadataSupport.addMetadata(status, "jiraTicket", issue.getKey());
         }
-    }
-
-    private void simulateResults(UUID runId, TestExecutionRequest request,
-                                 int exitCode, TestStatus status, String projectKey) {
-        String shortId   = runId.toString().substring(0, 8).toUpperCase();
-        String cycleKey  = "T-R-" + shortId;
-        String base      = zephyrBaseUrl.replaceAll("/$", "");
-        String zephyrUrl = base + "/secure/Tests.jspa#/testRun/" + cycleKey;
-
-        log.info("[MOCK] Zephyr Test-Run simuliert: key={}, url={}", cycleKey, zephyrUrl);
-        addMetadata(status, "zephyrCycleKey", cycleKey);
-        addReportUrl(status, "zephyr-run", zephyrUrl);
-
-        if (exitCode != 0) {
-            int ticketNumber = Math.abs(runId.hashCode()) % 9000 + 1000;
-            String ticketKey = projectKey + "-" + ticketNumber;
-            String ticketUrl = base + "/browse/" + ticketKey;
-
-            log.info("[MOCK] Jira Ticket simuliert: key={}, url={}", ticketKey, ticketUrl);
-            if (status != null) {
-                status.setJiraTicketKey(ticketKey);
-            }
-            addMetadata(status, "jiraTicket", ticketKey);
-            addReportUrl(status, "jira-ticket", ticketUrl);
-        }
-    }
-
-    private void addReportUrl(TestStatus status, String key, String url) {
-        if (status == null) return;
-        Map<String, String> reportUrls = status.getReportUrls();
-        if (reportUrls == null) {
-            reportUrls = new LinkedHashMap<>();
-            status.setReportUrls(reportUrls);
-        }
-        reportUrls.put(key, url);
-    }
-
-    private void addMetadata(TestStatus status, String key, Object value) {
-        if (status == null) return;
-        Map<String, Object> metadata = status.getMetadata();
-        if (metadata == null) {
-            metadata = new HashMap<>();
-            status.setMetadata(metadata);
-        }
-        metadata.put(key, value);
-    }
-
-    private Path getResultsBasePath(UUID runId) {
-        String envPath = System.getenv("TEST_RESULTS_PATH");
-        if (envPath != null && !envPath.isBlank()) {
-            return Path.of(envPath, runId.toString());
-        }
-        String sysProp = System.getProperty("test.results.path");
-        if (sysProp != null && !sysProp.isBlank()) {
-            return Path.of(sysProp, runId.toString());
-        }
-        return Path.of("test-results", runId.toString());
-    }
-
-    // Inner classes for Cucumber JSON parsing
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberFeature {
-        @JsonProperty("elements")
-        private List<CucumberElement> elements;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberElement {
-        @JsonProperty("tags")
-        private List<CucumberTag> tags;
-        @JsonProperty("steps")
-        private List<CucumberStep> steps;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberTag {
-        @JsonProperty("name")
-        private String name;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberStep {
-        @JsonProperty("result")
-        private CucumberResult result;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberResult {
-        @JsonProperty("status")
-        private String status;
     }
 }

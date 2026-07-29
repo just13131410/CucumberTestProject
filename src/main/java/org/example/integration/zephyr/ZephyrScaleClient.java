@@ -1,9 +1,11 @@
 package org.example.integration.zephyr;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.integration.AbstractAtlassianClient;
 import org.example.integration.model.ZephyrFolder;
 import org.example.integration.model.ZephyrTestCycle;
 import org.example.integration.model.ZephyrTestExecution;
+import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -13,34 +15,26 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
 @Slf4j
 @Component
-public class ZephyrScaleClient {
+public class ZephyrScaleClient extends AbstractAtlassianClient {
 
     private static final String ATM_BASE = "/rest/atm/1.0";
 
-    private final RestTemplate restTemplate;
-    private final String baseUrl;
-    private final String authHeader;
-
+    // zephyr.api-token bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
+    // Spring's @Value liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
     @Autowired
     public ZephyrScaleClient(
             @Value("${zephyr.base-url:}") String baseUrl,
-            @Value("${zephyr.username:}") String username,
-            @Value("${zephyr.api-token:}") String apiToken) {
-        this(new RestTemplate(), baseUrl, username, apiToken);
+            @Value("${zephyr.username:}") String username) {
+        this(new RestTemplate(), baseUrl, username, ConfigReader.get("zephyr.api-token", ""));
     }
 
     public ZephyrScaleClient(RestTemplate restTemplate, String baseUrl, String username, String apiToken) {
-        this.restTemplate = restTemplate;
-        this.baseUrl = baseUrl;
-        String credentials = username + ":" + apiToken;
-        this.authHeader = "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
+        super(restTemplate, baseUrl, username, apiToken);
     }
 
     public List<ZephyrFolder> getFolders(String projectKey, String folderType) {
@@ -100,12 +94,5 @@ public class ZephyrScaleClient {
         } catch (HttpStatusCodeException e) {
             log.error("Zephyr uploadTestResults failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
         }
-    }
-
-    private HttpHeaders buildHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.AUTHORIZATION, authHeader);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
     }
 }

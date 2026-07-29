@@ -118,4 +118,25 @@ class ZephyrScaleClientTest {
         assertNotNull(result);
         assertEquals("PROJ-42", result.getKey());
     }
+
+    @Test
+    void createIssue_ServerError_ReturnsNull() {
+        mockServer.expect(requestTo(BASE_URL + "/rest/api/2/issue"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withServerError());
+
+        JiraIssueRequest request = JiraIssueRequest.builder()
+                .fields(JiraIssueRequest.Fields.builder()
+                        .project(Map.of("key", "PROJ"))
+                        .summary("Test Automation Failure")
+                        .issuetype(Map.of("name", "Bug"))
+                        .assignee(Map.of("name", "automation-user"))
+                        .build())
+                .build();
+
+        JiraIssueResponse result = jiraClient.createIssue(request);
+
+        mockServer.verify();
+        assertNull(result);
+    }
 }

@@ -42,7 +42,7 @@ public class TestExecutionRequest {
             example = "[\"login.feature\", \"checkout.feature\"]")
     private List<String> features;
 
-    @Schema(description = "Anzahl paralleler Test-Threads",
+    @Schema(description = "Anzahl paralleler Test-Threads (reserviert, wird aktuell nicht ausgewertet)",
             example = "5",
             defaultValue = "5")
     @Builder.Default
@@ -61,33 +61,33 @@ public class TestExecutionRequest {
     @Schema(description = "Benutzerdefinierte Umgebungsvariablen")
     private Map<String, String> environmentVariables;
 
-    @Schema(description = "Retry-Strategie bei fehlgeschlagenen Tests",
+    @Schema(description = "Retry-Strategie bei fehlgeschlagenen Tests (reserviert, wird aktuell nicht ausgewertet)",
             defaultValue = "true")
     @Builder.Default
     private Boolean retryFailedTests = true;
 
-    @Schema(description = "Maximale Anzahl von Retry-Versuchen",
+    @Schema(description = "Maximale Anzahl von Retry-Versuchen (reserviert, wird aktuell nicht ausgewertet)",
             example = "2",
             defaultValue = "2")
     @Builder.Default
     private Integer maxRetries = 2;
 
-    @Schema(description = "Timeout fuer gesamte Test-Ausfuehrung in Minuten",
+    @Schema(description = "Timeout fuer gesamte Test-Ausfuehrung in Minuten (reserviert, wird aktuell nicht ausgewertet)",
             example = "30",
             defaultValue = "30")
     @Builder.Default
     private Integer timeoutMinutes = 30;
 
-    @Schema(description = "Webhook-URL fuer Benachrichtigungen (optional)")
+    @Schema(description = "Webhook-URL fuer Benachrichtigungen (reserviert, wird aktuell nicht ausgewertet)")
     private String webhookUrl;
 
-    @Schema(description = "Prioritaet der Test-Ausfuehrung",
+    @Schema(description = "Prioritaet der Test-Ausfuehrung (reserviert, wird aktuell nicht ausgewertet)",
             example = "HIGH",
             allowableValues = {"LOW", "NORMAL", "HIGH", "CRITICAL"})
     @Builder.Default
     private String priority = "NORMAL";
 
-    @Schema(description = "Initiator der Test-Ausfuehrung",
+    @Schema(description = "Initiator der Test-Ausfuehrung (reserviert, wird aktuell nicht ausgewertet)",
             example = "jenkins-pipeline")
     private String initiator;
 

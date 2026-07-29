@@ -80,6 +80,15 @@ public class ConfigReader {
     }
 
     /**
+     * Wandelt einen Property-Key in den erwarteten Umgebungsvariablen-Namen um (z.B.
+     * {@code "zephyr.api-token"} -> {@code "ZEPHYR_API_TOKEN"}), analog zu Spring Boots
+     * Relaxed-Binding-Konvention für {@code @Value}. Package-private für Unit-Tests.
+     */
+    static String toEnvKey(String key) {
+        return key.toUpperCase().replace(".", "_").replace("-", "_");
+    }
+
+    /**
      * Liest einen Konfigurationswert mit folgender Priorität:
      * <ol>
      *   <li>Umgebungsvariable (UPPER_SNAKE_CASE, z.B. von OpenShift ConfigMap/Secret)</li>
@@ -91,7 +100,7 @@ public class ConfigReader {
      * </ol>
      */
     public static String get(String key, String defaultValue) {
-        String envKey = key.toUpperCase().replace(".", "_");
+        String envKey = toEnvKey(key);
 
         String envValue = System.getenv(envKey);
         if (envValue != null) {

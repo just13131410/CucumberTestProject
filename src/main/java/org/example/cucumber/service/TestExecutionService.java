@@ -1,11 +1,5 @@
 package org.example.cucumber.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.qameta.allure.ConfigurationBuilder;
-import io.qameta.allure.ReportGenerator;
 import org.example.CucumberRunnerService;
 import org.example.cucumber.context.TestContext;
 import org.example.cucumber.model.TestExecutionRequest;
@@ -24,15 +18,31 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+/**
+ * Orchestriert Test-Ausführungen: Queueing, Admission Control, Ausführung über
+ * {@link CucumberRunnerService}, Status-Fortschritt und Anstoß von Report-Generierung und
+ * Zephyr/Jira-Integration nach Abschluss. Status-Buchhaltung ist in {@link RunStatusRegistry}
+ * ausgelagert, Allure-Report-Erzeugung in {@link AllureReportService} - diese Klasse bleibt
+ * reiner Orchestrator.
+ */
 @Slf4j
 @Service
 public class TestExecutionService {
@@ -46,10 +56,6 @@ public class TestExecutionService {
     private final int maxConcurrentRuns;
     /** Begrenzte Warteschlange für echte Backpressure. {@code test.execution.max-queue-size}. */
     private final int maxQueueSize;
-    /** Abgeschlossene Runs älter als N Stunden werden aus dem Speicher evictet (0 = nie via TTL). */
-    private final long statusRetentionHours;
-    /** Obergrenze der im Speicher gehaltenen Run-Status (verhindert unbegrenztes Wachstum). */
-    private final int statusMaxEntries;
 
     /** Blockiert die Menge der verbotenen System-Property-Präfixe aus Request-Env-Variablen. */
     private static final List<String> BLOCKED_PROP_PREFIXES =
@@ -58,32 +64,35 @@ public class TestExecutionService {
     private final CucumberRunnerService cucumberRunnerService;
     private final ZephyrScaleService zephyrScaleService;
     private final RunPersistenceService persistence;
+    private final RunStatusRegistry statusRegistry;
+    private final AllureReportService allureReportService;
     private final ThreadPoolExecutor executor;
-    /** Dedizierter Single-Thread-Executor für die CPU-/Native-lastige Allure-Report-Generierung. */
-    private final ExecutorService reportExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "allure-report-generator");
-        t.setDaemon(true);
-        return t;
-    });
-    private final Map<UUID, TestStatus> statusMap = new ConcurrentHashMap<>();
     private final Map<UUID, Future<?>> runningFutures = new ConcurrentHashMap<>();
 
-    /** Spring-Konstruktor: Concurrency, Queue-Größe und Eviction über Properties konfigurierbar. */
+    /** Spring-Konstruktor: Concurrency und Queue-Größe über Properties konfigurierbar. */
     @Autowired
     public TestExecutionService(CucumberRunnerService cucumberRunnerService,
                                 ZephyrScaleService zephyrScaleService,
                                 RunPersistenceService persistence,
+                                RunStatusRegistry statusRegistry,
+                                AllureReportService allureReportService,
                                 @Value("${test.execution.max-concurrent-runs:1}") int maxConcurrentRuns,
-                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize,
-                                @Value("${test.execution.status-retention-hours:24}") long statusRetentionHours,
-                                @Value("${test.execution.status-max-entries:500}") int statusMaxEntries) {
+                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize) {
         this.cucumberRunnerService = cucumberRunnerService;
         this.zephyrScaleService = zephyrScaleService;
         this.persistence = persistence;
+        this.statusRegistry = statusRegistry;
+        this.allureReportService = allureReportService;
+        if (maxConcurrentRuns > 1) {
+            log.error("test.execution.max-concurrent-runs={} ignoriert und auf 1 geklemmt: "
+                    + "applyRunProperties()/restoreRunProperties() mutieren prozessweite System-Properties "
+                    + "(Browser/Headless/Env-Variablen) - bei >1 gleichzeitigen In-Process-Runs wuerden sich "
+                    + "diese Properties gegenseitig ueberschreiben. Erst mit Out-of-Process-Isolation "
+                    + "(Subprozess) ist >1 daten-korrekt.", maxConcurrentRuns);
+            maxConcurrentRuns = 1;
+        }
         this.maxConcurrentRuns = Math.max(1, maxConcurrentRuns);
         this.maxQueueSize = Math.max(1, maxQueueSize);
-        this.statusRetentionHours = statusRetentionHours;
-        this.statusMaxEntries = Math.max(1, statusMaxEntries);
         // Begrenzte Queue → submit() wirft RejectedExecutionException bei Überlast → echtes 429.
         this.executor = new ThreadPoolExecutor(
                 this.maxConcurrentRuns, this.maxConcurrentRuns,
@@ -100,12 +109,13 @@ public class TestExecutionService {
     /** Backward-compatible Konstruktor (Unit-Tests): Defaults, N=1. */
     public TestExecutionService(CucumberRunnerService cucumberRunnerService,
                                 ZephyrScaleService zephyrScaleService) {
-        this(cucumberRunnerService, zephyrScaleService, new RunPersistenceService(), 1, 20, 24, 500);
+        this(cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
+                new RunStatusRegistry(24, 500), new AllureReportService(), 1, 20);
     }
 
     public TestExecutionResponse queueTestExecution(TestExecutionRequest request) {
         // Opportunistische Eviction alter Run-Status, damit statusMap nicht unbegrenzt wächst.
-        evictOldStatuses();
+        statusRegistry.evictOldStatuses();
 
         UUID runId = UUID.randomUUID();
         String tagsExpression = buildTagsExpression(request.getTags());
@@ -120,14 +130,14 @@ public class TestExecutionService {
                 .environment(request.getEnvironment())
                 .progress(0)
                 .build();
-        statusMap.put(runId, status);
+        statusRegistry.put(runId, status);
 
         // Admission Control: bei erschöpfter Kapazität (laufend + begrenzte Queue) sofort ablehnen.
         Future<?> future;
         try {
             future = executor.submit(() -> executeTest(runId, tagsExpression, features, request));
         } catch (RejectedExecutionException e) {
-            statusMap.remove(runId);
+            statusRegistry.remove(runId);
             int capacity = maxConcurrentRuns + maxQueueSize;
             log.warn("Kapazität erschöpft, Run abgelehnt (max-concurrent={}, max-queue={})",
                     maxConcurrentRuns, maxQueueSize);
@@ -152,16 +162,16 @@ public class TestExecutionService {
 
     private void executeTest(UUID runId, String tags, String features, TestExecutionRequest request) {
         try {
-            updateStatus(runId, "RUNNING", null);
-            statusMap.get(runId).setStartTime(LocalDateTime.now());
-            statusMap.get(runId).setCurrentPhase("EXECUTING");
+            statusRegistry.updateStatus(runId, "RUNNING", null);
+            statusRegistry.get(runId).setStartTime(LocalDateTime.now());
+            statusRegistry.get(runId).setCurrentPhase("EXECUTING");
 
             // Run-spezifische System-Properties setzen; vorherige Werte für sauberes Restore merken.
             Map<String, String> previousProps = applyRunProperties(request);
 
             // Count expected scenarios for progress tracking (best-effort, tag-unaware)
             int totalScenarios = countScenariosInFeatures();
-            Path allureResultsPath = getResultsPath(runId).resolve("allure-results");
+            Path allureResultsPath = allureReportService.getResultsPath(runId).resolve("allure-results");
             ScheduledExecutorService progressTracker = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "progress-tracker-" + runId.toString().substring(0, 8));
                 t.setDaemon(true);
@@ -174,7 +184,7 @@ public class TestExecutionService {
                     try (Stream<Path> files = Files.list(allureResultsPath)) {
                         completed = files.filter(p -> p.getFileName().toString().endsWith("-result.json")).count();
                     }
-                    TestStatus s = statusMap.get(runId);
+                    TestStatus s = statusRegistry.get(runId);
                     if (s != null) {
                         int pct = totalScenarios > 0
                                 ? (int) Math.min(95, completed * 100 / totalScenarios)
@@ -193,7 +203,7 @@ public class TestExecutionService {
                 restoreRunProperties(previousProps);
             }
 
-            TestStatus status = statusMap.get(runId);
+            TestStatus status = statusRegistry.get(runId);
             status.setEndTime(LocalDateTime.now());
             Duration elapsed = Duration.between(status.getStartTime(), status.getEndTime());
             status.setDuration(String.format("%02d:%02d", elapsed.toMinutes(), elapsed.toSecondsPart()));
@@ -218,13 +228,13 @@ public class TestExecutionService {
             status.setReportUrls(reportUrls);
 
             if (result.exitCode() == 0) {
-                updateStatus(runId, "COMPLETED", null);
+                statusRegistry.updateStatus(runId, "COMPLETED", null);
             } else {
-                updateStatus(runId, "FAILED", "Tests finished with exit code: " + result.exitCode());
+                statusRegistry.updateStatus(runId, "FAILED", "Tests finished with exit code: " + result.exitCode());
             }
 
             // Write executor.json for Allure (enables executor widget and trends in combined reports)
-            writeExecutorJson(runId, request);
+            allureReportService.writeExecutorJson(runId, request);
 
             // Terminal-Status persistieren (übersteht Pod-Restarts; Reconcile beim Start liest ihn).
             persistence.saveStatus(runId, status);
@@ -239,18 +249,18 @@ public class TestExecutionService {
             // Allure-Report NICHT auf dem Ausführungs-Thread generieren (Freemarker + Asset-Kopien
             // sind CPU-/Native-lastig) → in dedizierten Single-Thread-Executor auslagern.
             final TestStatus finalStatus = status;
-            reportExecutor.submit(() -> generateAllureReport(runId).ifPresent(url -> {
+            allureReportService.generateAllureReportAsync(runId, url -> {
                 Map<String, String> urls = finalStatus.getReportUrls();
                 if (urls != null) urls.put("allure", url);
                 persistence.saveStatus(runId, finalStatus);
-            }));
+            });
 
             log.info("Test execution finished: runId={}, exitCode={}", runId, result.exitCode());
 
         } catch (Exception e) {
             log.error("Test execution error: runId={}", runId, e);
-            updateStatus(runId, "FAILED", e.getMessage());
-            TestStatus st = statusMap.get(runId);
+            statusRegistry.updateStatus(runId, "FAILED", e.getMessage());
+            TestStatus st = statusRegistry.get(runId);
             if (st != null) {
                 st.setEndTime(LocalDateTime.now());
                 persistence.saveStatus(runId, st);
@@ -318,18 +328,18 @@ public class TestExecutionService {
         try {
             for (TestStatus s : persistence.loadAllStatuses()) {
                 if (s == null || s.getRunId() == null) continue;
-                if (!isTerminal(s.getStatus())) {
+                if (!RunStatusRegistry.isTerminal(s.getStatus())) {
                     s.setStatus("INTERRUPTED");
                     s.setErrorMessage("Service wurde während des Laufs neu gestartet");
                     if (s.getEndTime() == null) s.setEndTime(LocalDateTime.now());
                     persistence.saveStatus(s.getRunId(), s);
                 }
-                statusMap.putIfAbsent(s.getRunId(), s);
+                statusRegistry.putIfAbsent(s.getRunId(), s);
             }
             for (RunPersistenceService.OutboxEntry e : persistence.loadOutboxes()) {
                 try {
                     UUID rid = UUID.fromString(e.runId());
-                    TestStatus st = statusMap.get(rid);
+                    TestStatus st = statusRegistry.get(rid);
                     zephyrScaleService.uploadRunResults(rid, e.request(), e.exitCode(), st);
                     persistence.deleteOutbox(rid);
                     if (st != null) persistence.saveStatus(rid, st);
@@ -338,176 +348,47 @@ public class TestExecutionService {
                     log.warn("Outbox-Replay fehlgeschlagen für {}: {}", e.runId(), ex.getMessage());
                 }
             }
-            evictOldStatuses();
+            statusRegistry.evictOldStatuses();
         } catch (Exception e) {
             log.warn("Reconcile beim Start übersprungen: {}", e.getMessage());
         }
     }
 
-    /** True für Endzustände, deren Status evictbar ist. */
-    private static boolean isTerminal(String status) {
-        return "COMPLETED".equals(status) || "FAILED".equals(status)
-                || "CANCELLED".equals(status) || "INTERRUPTED".equals(status);
-    }
-
-    /**
-     * Entfernt abgeschlossene Run-Status aus dem Speicher: erst per TTL (älter als
-     * {@code statusRetentionHours}), dann per Größen-Cap ({@code statusMaxEntries}, ältester zuerst).
-     * Laufende/wartende Runs bleiben unangetastet. Best-effort, wirft nie.
-     */
-    private void evictOldStatuses() {
-        try {
-            if (statusRetentionHours > 0) {
-                Instant cutoff = Instant.now().minus(Duration.ofHours(statusRetentionHours));
-                statusMap.entrySet().removeIf(e -> {
-                    TestStatus s = e.getValue();
-                    if (!isTerminal(s.getStatus()) || s.getEndTime() == null) return false;
-                    return s.getEndTime().atZone(ZoneId.systemDefault()).toInstant().isBefore(cutoff);
-                });
-            }
-            int overflow = statusMap.size() - statusMaxEntries;
-            if (overflow > 0) {
-                statusMap.entrySet().stream()
-                        .filter(e -> isTerminal(e.getValue().getStatus()))
-                        .sorted(Comparator.comparing(e ->
-                                Optional.ofNullable(e.getValue().getEndTime()).orElse(LocalDateTime.MIN)))
-                        .limit(overflow)
-                        .map(Map.Entry::getKey)
-                        .toList()
-                        .forEach(statusMap::remove);
-            }
-        } catch (Exception e) {
-            log.debug("Status-Eviction übersprungen: {}", e.getMessage());
-        }
-    }
-
-    private void updateStatus(UUID runId, String newStatus, String errorMessage) {
-        TestStatus status = statusMap.get(runId);
-        if (status != null) {
-            status.setStatus(newStatus);
-            if (errorMessage != null) {
-                status.setErrorMessage(errorMessage);
-            }
-        }
-    }
-
     public Optional<TestStatus> getTestStatus(UUID runId) {
-        return Optional.ofNullable(statusMap.get(runId));
+        return statusRegistry.find(runId);
     }
 
     public List<TestStatus> getActiveTests() {
-        return statusMap.values().stream()
-                .filter(s -> "QUEUED".equals(s.getStatus()) || "RUNNING".equals(s.getStatus()))
-                .collect(Collectors.toList());
+        return statusRegistry.getActiveTests();
     }
 
     public Optional<Object> getTestReport(UUID runId) {
-        Path reportPath = getResultsPath(runId).resolve("cucumber-reports").resolve("Cucumber.json");
-        if (Files.exists(reportPath)) {
-            try {
-                String json = Files.readString(reportPath);
-                return Optional.of(json);
-            } catch (IOException e) {
-                log.error("Failed to read report for runId={}", runId, e);
-            }
-        }
-        return Optional.empty();
+        return allureReportService.getTestReport(runId);
     }
 
     public Optional<String> generateAllureReport(UUID runId) {
-        Path allureResultsDir = getResultsPath(runId).resolve("allure-results");
-        Path allureReportDir = getResultsPath(runId).resolve("allure-report");
-
-        if (!Files.exists(allureResultsDir)) {
-            log.warn("Allure results directory not found for runId: {}", runId);
-            return Optional.empty();
-        }
-
-        try {
-            Files.createDirectories(allureReportDir);
-            // Copy history from previous report (enables trends)
-            copyHistory(allureReportDir, allureResultsDir);
-
-            generateWithJavaApi(allureReportDir, List.of(allureResultsDir));
-
-            Path indexHtml = allureReportDir.resolve("index.html");
-            if (Files.exists(indexHtml)) {
-                String reportUrl = "/reports/" + runId + "/allure-report/index.html";
-                log.info("Allure report generated successfully for runId: {}", runId);
-                return Optional.of(reportUrl);
-            } else {
-                log.error("Report generation completed but index.html not found at: {}", indexHtml.toAbsolutePath());
-                return Optional.empty();
-            }
-        } catch (IOException e) {
-            log.error("Error generating Allure report for runId: {}", runId, e);
-            return Optional.empty();
-        }
-    }
-
-    private void generateWithJavaApi(Path outputDir, List<Path> resultDirs) throws IOException {
-        var config = new ConfigurationBuilder().useDefault().build();
-        ReportGenerator generator = new ReportGenerator(config);
-        generator.generate(outputDir, resultDirs);
-    }
-
-    /**
-     * Allure gruppiert Suites intern in einer vom Dateisystem abhängigen, nicht chronologischen
-     * Reihenfolge. Da jeder Suite-Name mit dem in {@link #copyAndEnrichResults} erzeugten Präfix
-     * {@code yyyyMMddHHmm} beginnt, wird hier absteigend nach Namen sortiert, damit im Overview-
-     * Widget und auf der Suites-Seite der neueste Run zuerst erscheint.
-     */
-    private void sortSuitesNewestFirst(Path reportDir) {
-        ObjectMapper mapper = new ObjectMapper();
-        sortJsonArrayFieldDescendingByName(mapper, reportDir.resolve("widgets").resolve("suites.json"), "items");
-        sortJsonArrayFieldDescendingByName(mapper, reportDir.resolve("data").resolve("suites.json"), "children");
-    }
-
-    private void sortJsonArrayFieldDescendingByName(ObjectMapper mapper, Path jsonFile, String arrayField) {
-        if (!Files.exists(jsonFile)) {
-            return;
-        }
-        try {
-            ObjectNode root = (ObjectNode) mapper.readTree(jsonFile.toFile());
-            JsonNode arrayNode = root.get(arrayField);
-            if (!(arrayNode instanceof ArrayNode array)) {
-                return;
-            }
-            List<JsonNode> items = new ArrayList<>();
-            array.forEach(items::add);
-            items.sort(Comparator.comparing((JsonNode n) -> n.path("name").asText("")).reversed());
-            ArrayNode sorted = mapper.createArrayNode();
-            sorted.addAll(items);
-            root.set(arrayField, sorted);
-            mapper.writeValue(jsonFile.toFile(), root);
-        } catch (IOException e) {
-            log.warn("Failed to sort suites JSON {}: {}", jsonFile, e.getMessage());
-        }
+        return allureReportService.generateAllureReport(runId);
     }
 
     public Optional<String> getReportUrl(UUID runId) {
-        Path allureReportDir = getResultsPath(runId).resolve("allure-report");
-        if (Files.exists(allureReportDir) && Files.exists(allureReportDir.resolve("index.html"))) {
-            return Optional.of("/reports/" + runId + "/allure-report/index.html");
-        }
-        return Optional.empty();
+        return allureReportService.getReportUrl(runId);
     }
 
     public Optional<TestStatus> cancelTestExecution(UUID runId) {
         Future<?> future = runningFutures.get(runId);
         if (future != null && !future.isDone()) {
             future.cancel(true);
-            updateStatus(runId, "CANCELLED", "Cancelled by user");
-            statusMap.get(runId).setEndTime(LocalDateTime.now());
+            statusRegistry.updateStatus(runId, "CANCELLED", "Cancelled by user");
+            statusRegistry.get(runId).setEndTime(LocalDateTime.now());
             runningFutures.remove(runId);
             log.info("Test execution cancelled: runId={}", runId);
-            return Optional.ofNullable(statusMap.get(runId));
+            return statusRegistry.find(runId);
         }
         return Optional.empty();
     }
 
     public boolean deleteTestExecution(UUID runId) {
-        TestStatus status = statusMap.get(runId);
+        TestStatus status = statusRegistry.get(runId);
         if (status == null) return false;
 
         // Don't delete running tests
@@ -515,13 +396,13 @@ public class TestExecutionService {
             return false;
         }
 
-        statusMap.remove(runId);
+        statusRegistry.remove(runId);
 
         // Clean up files
-        Path resultsPath = getResultsPath(runId);
+        Path resultsPath = allureReportService.getResultsPath(runId);
         if (Files.exists(resultsPath)) {
             try {
-                deleteDirectory(resultsPath);
+                allureReportService.deleteDirectory(resultsPath);
             } catch (IOException e) {
                 log.warn("Failed to delete results for runId={}", runId, e);
             }
@@ -530,309 +411,18 @@ public class TestExecutionService {
     }
 
     public Object getStatistics(String environment) {
-        var allStatuses = statusMap.values().stream()
-                .filter(s -> environment == null || environment.equals(s.getEnvironment()))
-                .toList();
-
-        long total = allStatuses.size();
-        long completed = allStatuses.stream().filter(s -> "COMPLETED".equals(s.getStatus())).count();
-        long failed = allStatuses.stream().filter(s -> "FAILED".equals(s.getStatus())).count();
-        long running = allStatuses.stream().filter(s -> "RUNNING".equals(s.getStatus())).count();
-        long queued = allStatuses.stream().filter(s -> "QUEUED".equals(s.getStatus())).count();
-
-        return Map.of(
-                "totalRuns", total,
-                "completedRuns", completed,
-                "failedRuns", failed,
-                "runningRuns", running,
-                "queuedRuns", queued,
-                "successRate", total > 0 ? (completed * 100.0 / total) : 0.0,
-                "maxConcurrentRuns", maxConcurrentRuns,
-                "maxQueueSize", maxQueueSize
-        );
+        Map<String, Object> stats = statusRegistry.getStatistics(environment);
+        stats.put("maxConcurrentRuns", maxConcurrentRuns);
+        stats.put("maxQueueSize", maxQueueSize);
+        return stats;
     }
 
     public List<UUID> listAvailableRuns() {
-        Path basePath = getBaseResultsPath();
-        if (!Files.exists(basePath)) {
-            return List.of();
-        }
-        try (Stream<Path> dirs = Files.list(basePath)) {
-            return dirs
-                    .filter(Files::isDirectory)
-                    .filter(dir -> Files.exists(dir.resolve("allure-results")))
-                    .map(dir -> {
-                        try {
-                            return UUID.fromString(dir.getFileName().toString());
-                        } catch (IllegalArgumentException e) {
-                            return null;
-                        }
-                    })
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-        } catch (IOException e) {
-            log.error("Failed to list available runs", e);
-            return List.of();
-        }
+        return allureReportService.listAvailableRuns();
     }
 
     public Optional<String> generateCombinedAllureReport(List<UUID> runIds) {
-        List<UUID> effectiveRunIds = (runIds == null || runIds.isEmpty())
-                ? listAvailableRuns()
-                : runIds;
-
-        if (effectiveRunIds.isEmpty()) {
-            log.warn("No runs available for combined report");
-            return Optional.empty();
-        }
-
-        // Filter to runs that actually have allure-results
-        List<UUID> validRunIds = effectiveRunIds.stream()
-                .filter(id -> Files.exists(getResultsPath(id).resolve("allure-results")))
-                .collect(Collectors.toList());
-
-        if (validRunIds.isEmpty()) {
-            log.warn("No allure-results directories found for the specified runs");
-            return Optional.empty();
-        }
-
-        Path tempDir = null;
-        try {
-            Path combinedReportDir = getBaseResultsPath().resolve("combined").resolve("allure-report");
-            Files.createDirectories(combinedReportDir);
-
-            // Read timestamps and sort runs ascending by time (oldest = buildOrder 1, newest = N)
-            // so that Allure trend chart is chronologically correct (left=old, right=new)
-            record RunEntry(UUID id, long timestamp) {}
-            List<RunEntry> sortedRuns = validRunIds.stream()
-                    .map(id -> new RunEntry(id,
-                            readTimestampFromExecutorJson(getResultsPath(id).resolve("allure-results"))))
-                    .sorted(Comparator.comparingLong(RunEntry::timestamp))
-                    .collect(Collectors.toList());
-
-            // Create temp directory with enriched copies of all allure-results
-            tempDir = Files.createTempDirectory("allure-combined-");
-            for (int i = 0; i < sortedRuns.size(); i++) {
-                RunEntry run = sortedRuns.get(i);
-                Path sourceDir = getResultsPath(run.id()).resolve("allure-results");
-                Path targetDir = tempDir.resolve(run.id().toString());
-                copyAndEnrichResults(sourceDir, targetDir, run.id(), i + 1, run.timestamp());
-            }
-
-            // Copy history from previous combined report to newest run's temp dir (enables trends)
-            UUID newestId = sortedRuns.getLast().id();
-            copyHistory(combinedReportDir, tempDir.resolve(newestId.toString()));
-
-            // Generate report via Java API (kein CLI-Subprocess nötig)
-            final Path resolvedTempDir = tempDir;
-            List<Path> resultDirs = sortedRuns.stream()
-                    .map(run -> resolvedTempDir.resolve(run.id().toString()))
-                    .collect(Collectors.toList());
-            generateWithJavaApi(combinedReportDir, resultDirs);
-            sortSuitesNewestFirst(combinedReportDir);
-
-            Path indexHtml = combinedReportDir.resolve("index.html");
-            if (Files.exists(indexHtml)) {
-                String reportUrl = "/reports/combined/allure-report/index.html";
-                log.info("Combined Allure report generated successfully from {} runs at URL: {}",
-                        validRunIds.size(), reportUrl);
-                return Optional.of(reportUrl);
-            } else {
-                log.error("Combined report generation completed but index.html not found at: {}", indexHtml.toAbsolutePath());
-                return Optional.empty();
-            }
-        } catch (IOException e) {
-            log.error("Error generating combined Allure report", e);
-            return Optional.empty();
-        } finally {
-            // Clean up temp directory
-            if (tempDir != null) {
-                try {
-                    deleteDirectory(tempDir);
-                } catch (IOException e) {
-                    log.warn("Failed to clean up temp directory: {}", tempDir, e);
-                }
-            }
-        }
-    }
-
-    private Path getBaseResultsPath() {
-        String envPath = System.getenv("TEST_RESULTS_PATH");
-        if (envPath != null && !envPath.isBlank()) {
-            return Path.of(envPath);
-        }
-        String sysProp = System.getProperty("test.results.path");
-        if (sysProp != null && !sysProp.isBlank()) {
-            return Path.of(sysProp);
-        }
-        return Path.of("test-results");
-    }
-
-    private Path getResultsPath(UUID runId) {
-        return getBaseResultsPath().resolve(runId.toString());
-    }
-
-    private void deleteDirectory(Path dir) throws IOException {
-        try (var walk = Files.walk(dir)) {
-            walk.sorted(Comparator.reverseOrder())
-                    .forEach(path -> {
-                        try { Files.delete(path); } catch (IOException ignored) {}
-                    });
-        }
-    }
-
-    private static final DateTimeFormatter RUN_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
-
-    private void copyAndEnrichResults(Path sourceDir, Path targetDir, UUID runId,
-                                      long buildOrder, long runTimestamp) throws IOException {
-        Files.createDirectories(targetDir);
-        String runLabel = runId.toString().substring(0, 8);
-
-        // Format the run timestamp as yyyyMMddHHmm (e.g. 202602191316)
-        String formattedDate = runTimestamp > 0
-                ? LocalDateTime.ofInstant(Instant.ofEpochMilli(runTimestamp), ZoneId.systemDefault())
-                        .format(RUN_DATE_FMT)
-                : "";
-
-        // Read tags from existing executor.json (written during test execution)
-        String runTags = readTagsFromExecutorJson(sourceDir);
-
-        // Build label:  <yyyyMMddHHmm> <shortId> <tags>
-        String suiteLabel = (formattedDate.isEmpty() ? "" : formattedDate + " ")
-                + runLabel
-                + (runTags.isEmpty() ? "" : " " + runTags);
-
-        try (var files = Files.list(sourceDir)) {
-            files.forEach(source -> {
-                try {
-                    Path target = targetDir.resolve(source.getFileName());
-                    String fileName = source.getFileName().toString();
-
-                    if (fileName.endsWith("-result.json")) {
-                        // Enrich test result: add run label, make historyId unique per run
-                        String content = Files.readString(source);
-
-                        // Add parentSuite label with runId + tags for grouping/filtering
-                        String runLabelJson = String.format(
-                                "{\"name\":\"parentSuite\",\"value\":\"%s\"}", suiteLabel);
-                        String tagJson = String.format(
-                                "{\"name\":\"tag\",\"value\":\"run-%s\"}", runLabel);
-
-                        // Insert labels into the labels array
-                        content = content.replaceFirst(
-                                "\"labels\"\\s*:\\s*\\[",
-                                "\"labels\":[" + runLabelJson + "," + tagJson + ",");
-
-                        // Make historyId unique per run so each execution shows as separate entry
-                        content = content.replaceAll(
-                                "\"historyId\"\\s*:\\s*\"([^\"]+)\"",
-                                "\"historyId\":\"$1-" + runId + "\"");
-
-                        Files.writeString(target, content);
-                    } else {
-                        // Copy other files as-is (attachments, etc.)
-                        Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    }
-                } catch (IOException e) {
-                    log.warn("Failed to copy/enrich file: {}", source, e);
-                }
-            });
-        }
-
-        // Write executor.json for this run
-        Files.writeString(targetDir.resolve("executor.json"),
-                buildExecutorJson(suiteLabel, buildOrder, null, runId.toString()));
-    }
-
-    private String readTagsFromExecutorJson(Path allureResultsDir) {
-        Path executorFile = allureResultsDir.resolve("executor.json");
-        if (!Files.exists(executorFile)) {
-            return "";
-        }
-        try {
-            String content = Files.readString(executorFile);
-            // reportName format: "Run <id> [<env>] <tags>"
-            // Extract tags from reportName field
-            java.util.regex.Matcher matcher = java.util.regex.Pattern
-                    .compile("\"reportName\"\\s*:\\s*\"[^\\[]*\\[[^\\]]*\\]\\s*(.*)\"")
-                    .matcher(content);
-            if (matcher.find()) {
-                return matcher.group(1).trim();
-            }
-        } catch (IOException e) {
-            log.warn("Failed to read executor.json from {}", allureResultsDir, e);
-        }
-        return "";
-    }
-
-    /** Reads the buildOrder field (Unix timestamp in ms) from a run's executor.json. */
-    private long readTimestampFromExecutorJson(Path allureResultsDir) {
-        Path executorFile = allureResultsDir.resolve("executor.json");
-        if (!Files.exists(executorFile)) return 0L;
-        try {
-            String content = Files.readString(executorFile);
-            java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("\"buildOrder\"\\s*:\\s*(\\d+)")
-                    .matcher(content);
-            if (m.find()) return Long.parseLong(m.group(1));
-        } catch (IOException e) {
-            log.warn("Failed to read timestamp from executor.json at {}", allureResultsDir, e);
-        }
-        return 0L;
-    }
-
-    private void writeExecutorJson(UUID runId, TestExecutionRequest request) {
-        try {
-            Path allureResultsDir = getResultsPath(runId).resolve("allure-results");
-            if (!Files.exists(allureResultsDir)) return;
-
-            String buildName = "Run " + runId.toString().substring(0, 8);
-            String env = request.getEnvironment() != null ? request.getEnvironment() : "unknown";
-            String tags = request.getTags() != null ? String.join(", ", request.getTags()) : "";
-            String reportName = String.format("%s [%s] %s", buildName, env, tags);
-
-            Files.writeString(allureResultsDir.resolve("executor.json"),
-                    buildExecutorJson(buildName, System.currentTimeMillis(), reportName, runId.toString()));
-        } catch (IOException e) {
-            log.warn("Failed to write executor.json for runId={}", runId, e);
-        }
-    }
-
-    /** Builds the JSON content for Allure's executor.json. {@code reportName} is omitted when null. */
-    private String buildExecutorJson(String buildName, long buildOrder, String reportName, String runId) {
-        String reportNameField = reportName != null
-                ? String.format("\"reportName\": \"%s\",%n  ", reportName)
-                : "";
-        return String.format("""
-                {
-                  "name": "Cucumber Test Service",
-                  "type": "api",
-                  "buildName": "%s",
-                  "buildOrder": %d,
-                  %s"reportUrl": "/reports/%s/allure-report/index.html"
-                }""", buildName, buildOrder, reportNameField, runId);
-    }
-
-    private void copyHistory(Path sourceReportDir, Path targetResultsDir) {
-        Path historySource = sourceReportDir.resolve("history");
-        if (!Files.exists(historySource)) return;
-
-        Path historyTarget = targetResultsDir.resolve("history");
-        try {
-            Files.createDirectories(historyTarget);
-            try (var files = Files.list(historySource)) {
-                files.forEach(source -> {
-                    try {
-                        Files.copy(source, historyTarget.resolve(source.getFileName()),
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    } catch (IOException e) {
-                        log.warn("Failed to copy history file: {}", source, e);
-                    }
-                });
-            }
-        } catch (IOException e) {
-            log.warn("Failed to copy history directory", e);
-        }
+        return allureReportService.generateCombinedAllureReport(runIds);
     }
 
     private int countScenariosInFeatures() {
@@ -869,6 +459,6 @@ public class TestExecutionService {
     @PreDestroy
     public void shutdown() {
         executor.shutdownNow();
-        reportExecutor.shutdownNow();
+        allureReportService.shutdown();
     }
 }

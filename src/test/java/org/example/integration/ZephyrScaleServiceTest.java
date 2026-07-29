@@ -4,6 +4,8 @@ import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.jira.JiraClient;
 import org.example.integration.model.*;
+import org.example.integration.zephyr.CucumberResultReader;
+import org.example.integration.zephyr.MockIntegrationService;
 import org.example.integration.zephyr.ZephyrScaleClient;
 import org.example.integration.zephyr.ZephyrScaleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,16 +37,20 @@ class ZephyrScaleServiceTest {
 
     private ZephyrScaleService service;
 
+    private MockIntegrationService mockIntegrationService;
+
     @BeforeEach
     void setUp() {
-        service = new ZephyrScaleService(zephyrClient, jiraClient);
+        mockIntegrationService = new MockIntegrationService();
+        ReflectionTestUtils.setField(mockIntegrationService, "zephyrBaseUrl", "https://jira.test.com");
+
+        service = new ZephyrScaleService(zephyrClient, jiraClient, new CucumberResultReader(), mockIntegrationService);
         ReflectionTestUtils.setField(service, "zephyrEnabled", true);
         ReflectionTestUtils.setField(service, "defaultProjectKey", "PROJ");
         ReflectionTestUtils.setField(service, "jiraEnabled", false);
         ReflectionTestUtils.setField(service, "jiraAssigneeAccountId", "automation-user");
         ReflectionTestUtils.setField(service, "jiraIssueType", "Bug");
         ReflectionTestUtils.setField(service, "mockEnabled", false);
-        ReflectionTestUtils.setField(service, "zephyrBaseUrl", "https://jira.test.com");
     }
 
     private TestExecutionRequest createRequest(List<String> tags) {

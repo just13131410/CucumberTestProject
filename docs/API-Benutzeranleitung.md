@@ -98,15 +98,20 @@ Content-Type: application/json
 | `environment`         | String           | Ja      | Ziel-Umgebung: `dev`, `staging`, `prod`, `performance` |
 | `tags`                | Liste (Strings)  | Ja      | Cucumber-Tags zum Filtern der Tests                    |
 | `features`            | Liste (Strings)  | Nein    | Spezifische Feature-Dateien                            |
-| `parallelCount`       | Integer          | Nein    | Anzahl paralleler Threads (Standard: 5)                |
 | `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `firefox`, `webkit` |
 | `environmentVariables`| Map              | Nein    | Benutzerdefinierte Umgebungsvariablen                  |
-| `retryFailedTests`    | Boolean          | Nein    | Fehlgeschlagene Tests wiederholen (Standard: true)     |
-| `maxRetries`          | Integer          | Nein    | Max. Wiederholungsversuche (Standard: 2)               |
-| `timeoutMinutes`      | Integer          | Nein    | Timeout in Minuten (Standard: 30)                      |
-| `webhookUrl`          | String           | Nein    | URL für Ergebnis-Benachrichtigung                     |
-| `priority`            | String           | Nein    | `LOW`, `NORMAL`, `HIGH`, `CRITICAL` (Standard: NORMAL) |
-| `initiator`           | String           | Nein    | Wer den Test auslöst (z.B. Pipeline-Name)             |
+
+Folgende Felder werden aktuell im Request-Body akzeptiert (für zukünftige Erweiterungen reserviert), aber vom Service **nicht ausgewertet** - sie haben derzeit keine Auswirkung auf die Ausführung:
+
+| Feld                  | Typ              | Beschreibung                                           |
+|-----------------------|------------------|---------------------------------------------------------|
+| `parallelCount`       | Integer          | Anzahl paralleler Threads (Standard: 5)                |
+| `retryFailedTests`    | Boolean          | Fehlgeschlagene Tests wiederholen (Standard: true)     |
+| `maxRetries`          | Integer          | Max. Wiederholungsversuche (Standard: 2)               |
+| `timeoutMinutes`      | Integer          | Timeout in Minuten (Standard: 30)                      |
+| `webhookUrl`          | String           | URL für Ergebnis-Benachrichtigung                     |
+| `priority`            | String           | `LOW`, `NORMAL`, `HIGH`, `CRITICAL` (Standard: NORMAL) |
+| `initiator`           | String           | Wer den Test auslöst (z.B. Pipeline-Name)             |
 
 **Beispiel - Smoke Tests starten:**
 ```bash
@@ -125,9 +130,7 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   -d '{
     "environment": "staging",
     "tags": ["@API-Test"],
-    "parallelCount": 3,
-    "timeoutMinutes": 15,
-    "initiator": "jenkins-pipeline-team-a"
+    "environmentVariables": {"API_TOKEN": "..."}
   }'
 ```
 
@@ -622,8 +625,7 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   -H "Content-Type: application/json" \
   -d '{
     "environment": "dev",
-    "tags": ["@smoke"],
-    "initiator": "team-a-pipeline"
+    "tags": ["@smoke"]
   }'
 
 # Team B - API Tests
@@ -631,8 +633,7 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   -H "Content-Type: application/json" \
   -d '{
     "environment": "staging",
-    "tags": ["@API-Test"],
-    "initiator": "team-b-pipeline"
+    "tags": ["@API-Test"]
   }'
 ```
 

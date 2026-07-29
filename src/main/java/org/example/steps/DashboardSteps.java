@@ -8,6 +8,7 @@ import io.cucumber.java.de.Gegebensei;
 import io.cucumber.java.de.Dann;
 import io.cucumber.java.de.Wenn;
 import io.cucumber.java.de.Und;
+import org.example.config.BrowserConfig;
 import org.example.config.PlaywrightBrowserInstaller;
 import org.example.hooks.AxeReportHook;
 import org.example.pages.BasePage;
@@ -26,7 +27,8 @@ public class DashboardSteps extends BasePage {
     private final PlaywrightBrowserInstaller browserInstaller;
     private Scenario currentScenario;
 
-    public DashboardSteps(PlaywrightBrowserInstaller browserInstaller) {
+    public DashboardSteps(PlaywrightBrowserInstaller browserInstaller, BrowserConfig browserConfig) {
+        super(browserConfig);
         this.browserInstaller = browserInstaller;
     }
 

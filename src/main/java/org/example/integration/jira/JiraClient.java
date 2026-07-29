@@ -6,7 +6,6 @@ import org.example.integration.model.JiraIssueRequest;
 import org.example.integration.model.JiraIssueResponse;
 import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
@@ -23,13 +22,14 @@ public class JiraClient extends AbstractAtlassianClient {
     // Jira und Zephyr Scale laufen auf derselben Jira-DC-Instanz, daher teilen sich
     // JiraClient und ZephyrScaleClient bewusst dieselben zephyr.*-Auth-Properties
     // statt eigener jira.*-Properties zu duplizieren.
-    // zephyr.api-token bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
+    // zephyr.* Werte bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
     // Spring's @Value liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
     @Autowired
-    public JiraClient(
-            @Value("${zephyr.base-url:}") String baseUrl,
-            @Value("${zephyr.username:}") String username) {
-        this(new RestTemplate(), baseUrl, username, ConfigReader.get("zephyr.api-token", ""));
+    public JiraClient() {
+        this(new RestTemplate(),
+                ConfigReader.get("zephyr.base-url", "https://jira.yourcompany.com"),
+                ConfigReader.get("zephyr.username", ""),
+                ConfigReader.get("zephyr.api-token", ""));
     }
 
     public JiraClient(RestTemplate restTemplate, String baseUrl, String username, String apiToken) {

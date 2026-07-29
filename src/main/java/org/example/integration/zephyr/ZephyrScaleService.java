@@ -53,12 +53,30 @@ public class ZephyrScaleService {
 
     @PostConstruct
     private void validateConfig() {
+        logResolvedConfig();
         if (zephyrEnabled && !mockEnabled && zephyrApiToken.isBlank()) {
             log.error("zephyr.enabled=true, aber zephyr.api-token ist leer - Zephyr-Uploads werden mit 401 fehlschlagen");
         }
         if (jiraEnabled && !mockEnabled && jiraAssigneeAccountId.isBlank()) {
             log.error("jira.enabled=true, aber jira.default-assignee-account-id ist leer - Jira-Ticket-Erstellung wird fehlschlagen");
         }
+    }
+
+    /**
+     * Loggt beim Start, welche Zephyr-URL und welche Credentials tatsaechlich verwendet werden
+     * und aus welcher Quelle (Umgebungsvariable/.env/Secret-Datei/config.properties/Default) sie
+     * stammen - der Token-Wert selbst wird nie geloggt, nur seine Laenge als Vorhanden-Nachweis.
+     */
+    private void logResolvedConfig() {
+        var baseUrl = ConfigReader.getWithSource("zephyr.base-url", "https://jira.yourcompany.com");
+        var username = ConfigReader.getWithSource("zephyr.username", "");
+        var token = ConfigReader.getWithSource("zephyr.api-token", "");
+
+        log.info("Zephyr Scale URL: {} (Quelle: {})", baseUrl.value(), baseUrl.source());
+        log.info("Zephyr Scale Credentials: username='{}' (Quelle: {}), api-token={} (Quelle: {})",
+                username.value().isBlank() ? "<nicht gesetzt>" : username.value(), username.source(),
+                token.value().isBlank() ? "<nicht gesetzt>" : "***gesetzt, " + token.value().length() + " Zeichen***",
+                token.source());
     }
 
     public void uploadRunResults(UUID runId, TestExecutionRequest request, int exitCode, TestStatus status) {

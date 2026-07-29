@@ -117,6 +117,40 @@ class ConfigReaderTest {
         assertEquals("fallback", result);
     }
 
+    // --- getWithSource Tests ---
+
+    @Test
+    void getWithSource_ReturnsSystemPropertySource_WhenSet() {
+        System.setProperty("testKey", "value");
+
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("testKey", "default");
+
+        assertEquals("value", result.value());
+        assertEquals("System-Property (-DtestKey)", result.source());
+    }
+
+    @Test
+    void getWithSource_ReturnsDefaultSource_WhenKeyNotFoundAnywhere() {
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("nonExistentKey", "fallback");
+
+        assertEquals("fallback", result.value());
+        assertEquals("Default", result.source());
+    }
+
+    @Test
+    void getWithSource_ReturnsClasspathSource_ForKnownPropertiesFileKey() {
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("baseUrl", "default");
+
+        assertEquals("config.properties (Classpath)", result.source());
+    }
+
+    @Test
+    void get_DelegatesToGetWithSource_SameValue() {
+        System.setProperty("testKey", "delegated");
+
+        assertEquals("delegated", ConfigReader.get("testKey", "default"));
+    }
+
     // --- toEnvKey Tests ---
 
     @Test

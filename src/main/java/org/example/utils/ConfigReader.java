@@ -100,39 +100,50 @@ public class ConfigReader {
      * </ol>
      */
     public static String get(String key, String defaultValue) {
+        return getWithSource(key, defaultValue).value();
+    }
+
+    /** Aufgelöster Konfigurationswert plus menschenlesbare Angabe, aus welcher Quelle er stammt. */
+    public record ResolvedValue(String value, String source) {}
+
+    /**
+     * Wie {@link #get(String, String)}, liefert zusätzlich die Quelle mit - gedacht für
+     * Diagnose-/Startup-Logs (z.B. "welche Zephyr-URL/Credentials werden tatsächlich verwendet").
+     */
+    public static ResolvedValue getWithSource(String key, String defaultValue) {
         String envKey = toEnvKey(key);
 
         String envValue = System.getenv(envKey);
         if (envValue != null) {
             log.debug("Key '{}' bezogen aus: Umgebungsvariable ({})", key, envKey);
-            return envValue;
+            return new ResolvedValue(envValue, "Umgebungsvariable (" + envKey + ")");
         }
 
         String sysProp = System.getProperty(key);
         if (sysProp != null) {
             log.debug("Key '{}' bezogen aus: System-Property (-D{})", key, key);
-            return sysProp;
+            return new ResolvedValue(sysProp, "System-Property (-D" + key + ")");
         }
 
         String dotenvValue = dotenv.get(envKey, null);
         if (dotenvValue != null) {
             log.debug("Key '{}' bezogen aus: .env-Datei", key);
-            return dotenvValue;
+            return new ResolvedValue(dotenvValue, ".env-Datei");
         }
 
         String secretValue = secretProperties.getProperty(key);
         if (secretValue != null) {
             log.debug("Key '{}' bezogen aus: Secret-Datei (CONFIGPATH)", key);
-            return secretValue;
+            return new ResolvedValue(secretValue, "Secret-Datei (CONFIGPATH)");
         }
 
         String propValue = properties.getProperty(key);
         if (propValue != null) {
             log.debug("Key '{}' bezogen aus: config.properties (Classpath)", key);
-            return propValue;
+            return new ResolvedValue(propValue, "config.properties (Classpath)");
         }
 
         log.debug("Key '{}' nicht gefunden – verwende Default: '{}'", key, defaultValue);
-        return defaultValue;
+        return new ResolvedValue(defaultValue, "Default");
     }
 }

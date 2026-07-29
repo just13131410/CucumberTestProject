@@ -7,7 +7,6 @@ import org.example.integration.model.ZephyrTestCycle;
 import org.example.integration.model.ZephyrTestExecution;
 import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
@@ -24,13 +23,14 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
 
     private static final String ATM_BASE = "/rest/atm/1.0";
 
-    // zephyr.api-token bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
+    // zephyr.* Werte bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
     // Spring's @Value liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
     @Autowired
-    public ZephyrScaleClient(
-            @Value("${zephyr.base-url:}") String baseUrl,
-            @Value("${zephyr.username:}") String username) {
-        this(new RestTemplate(), baseUrl, username, ConfigReader.get("zephyr.api-token", ""));
+    public ZephyrScaleClient() {
+        this(new RestTemplate(),
+                ConfigReader.get("zephyr.base-url", "https://jira.yourcompany.com"),
+                ConfigReader.get("zephyr.username", ""),
+                ConfigReader.get("zephyr.api-token", ""));
     }
 
     public ZephyrScaleClient(RestTemplate restTemplate, String baseUrl, String username, String apiToken) {

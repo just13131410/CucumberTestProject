@@ -20,12 +20,10 @@ public class CucumberHooks {
 
     private static final Logger log = LoggerFactory.getLogger(CucumberHooks.class);
 
-    private final ThreadLocal<String> scenarioName = new ThreadLocal<>();
     private final ThreadLocal<LocalDateTime> scenarioStartTime = new ThreadLocal<>();
 
     @Before(order = 0)
     public void beforeScenario(Scenario scenario) {
-        scenarioName.set(scenario.getName());
         scenarioStartTime.set(LocalDateTime.now());
 
         log.info("========================================");
@@ -51,7 +49,6 @@ public class CucumberHooks {
                 java.time.Duration.between(scenarioStartTime.get(), endTime).toMillis());
         log.info("========================================");
 
-        scenarioName.remove();
         scenarioStartTime.remove();
     }
 }

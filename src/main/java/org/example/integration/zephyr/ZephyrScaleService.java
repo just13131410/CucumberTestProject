@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,19 @@ public class ZephyrScaleService {
 
     @Value("${zephyr.base-url:https://jira.yourcompany.com}")
     private String zephyrBaseUrl;
+
+    @Value("${zephyr.api-token:}")
+    private String zephyrApiToken;
+
+    @PostConstruct
+    private void validateConfig() {
+        if (zephyrEnabled && !mockEnabled && zephyrApiToken.isBlank()) {
+            log.error("zephyr.enabled=true, aber zephyr.api-token ist leer - Zephyr-Uploads werden mit 401 fehlschlagen");
+        }
+        if (jiraEnabled && !mockEnabled && jiraAssigneeAccountId.isBlank()) {
+            log.error("jira.enabled=true, aber jira.default-assignee-account-id ist leer - Jira-Ticket-Erstellung wird fehlschlagen");
+        }
+    }
 
     public void uploadRunResults(UUID runId, TestExecutionRequest request, int exitCode, TestStatus status) {
         if (!zephyrEnabled && !jiraEnabled && !mockEnabled) {
@@ -256,7 +270,9 @@ public class ZephyrScaleService {
             String ticketUrl = base + "/browse/" + ticketKey;
 
             log.info("[MOCK] Jira Ticket simuliert: key={}, url={}", ticketKey, ticketUrl);
-            status.setJiraTicketKey(ticketKey);
+            if (status != null) {
+                status.setJiraTicketKey(ticketKey);
+            }
             addMetadata(status, "jiraTicket", ticketKey);
             addReportUrl(status, "jira-ticket", ticketUrl);
         }

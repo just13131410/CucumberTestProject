@@ -122,18 +122,8 @@ public class DashboardSteps extends BasePage {
         page.locator("mat-form-field").filter(new Locator.FilterOptions().setHasText("UUID")).locator("input").fill(prefix);
     }
 
-    private boolean isValidGuid(String value) {
-        return value != null && value.matches(
-            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-        );
-    }
-
     private int heutigesDatum() {
         return java.time.LocalDate.now().getDayOfMonth();
-    }
-
-    private String heutigesDatumFormatiert() {
-        return java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy"));
     }
 
     @Wenn("ich im Filter für das Datum heute auswähle")
@@ -220,14 +210,17 @@ public class DashboardSteps extends BasePage {
 
     @Dann("sollte der Paginator {string} anzeigen")
     public void sollte_der_paginator_anzeigen(String rangeText) {
-        Locator rangeLabel = page.locator(".mat-mdc-paginator-range-label");
-        assertThat(rangeLabel).containsText(rangeText);
+        assertPaginatorText(rangeText);
     }
 
     @Dann("der Paginator sollte {string} anzeigen")
     public void der_paginator_sollte_anzeigen(String rangeText) {
-        Locator rangeLabel = page.locator(".mat-mdc-paginator-range-label");
         captureScreenshot(page, "Paginator", currentScenario);
+        assertPaginatorText(rangeText);
+    }
+
+    private void assertPaginatorText(String rangeText) {
+        Locator rangeLabel = page.locator(".mat-mdc-paginator-range-label");
         assertThat(rangeLabel).containsText(rangeText);
     }
 
@@ -239,11 +232,15 @@ public class DashboardSteps extends BasePage {
 
     @Wenn("ich auf die nächste Seite blättere")
     public void ich_auf_die_naechste_seite_blaettere() {
-        page.locator("button.mat-mdc-paginator-navigation-next").click();
+        clickNextPage();
     }
 
     @Und("ich blättere auf die nächste Seite")
     public void ich_blaettere_auf_die_naechste_seite() {
+        clickNextPage();
+    }
+
+    private void clickNextPage() {
         page.locator("button.mat-mdc-paginator-navigation-next").click();
     }
 
@@ -327,18 +324,15 @@ public class DashboardSteps extends BasePage {
 
     @Dann("sollte die Tabelle {int} Zeilen anzeigen")
     public void sollte_die_tabelle_zeilen_anzeigen(Integer count) {
-        page.waitForTimeout(500);
-        if (count == 0) {
-            assertThat(page.locator("table tbody")).containsText("Keine Daten für den Filter gefunden");
-        } else {
-            assertThat(page.locator("table tbody")).not().containsText("Keine Daten für den Filter gefunden");
-            int rowCount = page.locator("table tbody tr").count();
-            assertEquals(count.intValue(), rowCount, "Erwartete %d Zeilen, aber %d gefunden".formatted(count, rowCount));
-        }
+        assertRowCount(count);
     }
 
     @Wenn("die Tabelle {int} Zeilen anzeigt")
     public void die_tabelle_zeilen_anzeigt(Integer count) {
+        assertRowCount(count);
+    }
+
+    private void assertRowCount(Integer count) {
         page.waitForTimeout(500);
         if (count == 0) {
             assertThat(page.locator("table tbody")).containsText("Keine Daten für den Filter gefunden");

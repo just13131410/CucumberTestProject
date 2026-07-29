@@ -1,5 +1,7 @@
 package org.example.cucumber.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.CucumberRunnerService;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
@@ -9,6 +11,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -27,6 +32,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
@@ -60,6 +66,14 @@ class TestExecutionServiceTest {
         return request;
     }
 
+    private void awaitStatus(UUID runId, String expectedStatus) {
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
+            assertTrue(status.isPresent());
+            assertEquals(expectedStatus, status.get().getStatus());
+        });
+    }
+
     // --- buildTagsExpression tests (private method via reflection) ---
 
     private String buildTagsExpression(List<String> tags) throws Exception {
@@ -68,36 +82,21 @@ class TestExecutionServiceTest {
         return (String) method.invoke(testExecutionService, tags);
     }
 
-    @Test
-    void buildTagsExpression_NullTags_ReturnsNull() throws Exception {
-        assertNull(buildTagsExpression(null));
+    @ParameterizedTest(name = "tags={0} -> \"{1}\"")
+    @MethodSource("buildTagsExpressionCases")
+    void buildTagsExpression_VariousInputs(List<String> tags, String expected) throws Exception {
+        assertEquals(expected, buildTagsExpression(tags));
     }
 
-    @Test
-    void buildTagsExpression_EmptyTags_ReturnsNull() throws Exception {
-        assertNull(buildTagsExpression(List.of()));
-    }
-
-    @Test
-    void buildTagsExpression_SingleTag_WithAtPrefix() throws Exception {
-        assertEquals("@smoke", buildTagsExpression(List.of("@smoke")));
-    }
-
-    @Test
-    void buildTagsExpression_SingleTag_WithoutAtPrefix_AddsIt() throws Exception {
-        assertEquals("@smoke", buildTagsExpression(List.of("smoke")));
-    }
-
-    @Test
-    void buildTagsExpression_MultipleTags_JoinedWithOr() throws Exception {
-        String result = buildTagsExpression(List.of("@smoke", "@regression"));
-        assertEquals("@smoke or @regression", result);
-    }
-
-    @Test
-    void buildTagsExpression_MixedPrefixes() throws Exception {
-        String result = buildTagsExpression(List.of("smoke", "@critical"));
-        assertEquals("@smoke or @critical", result);
+    private static Stream<Arguments> buildTagsExpressionCases() {
+        return Stream.of(
+                Arguments.of(null, null),
+                Arguments.of(List.of(), null),
+                Arguments.of(List.of("@smoke"), "@smoke"),
+                Arguments.of(List.of("smoke"), "@smoke"),
+                Arguments.of(List.of("@smoke", "@regression"), "@smoke or @regression"),
+                Arguments.of(List.of("smoke", "@critical"), "@smoke or @critical")
+        );
     }
 
     // --- queueTestExecution tests ---
@@ -148,11 +147,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
-            Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
-            assertTrue(status.isPresent());
-            assertEquals("COMPLETED", status.get().getStatus());
-        });
+        awaitStatus(runId, "COMPLETED");
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertEquals(100, finalStatus.getProgress());
@@ -169,11 +164,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
-            Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
-            assertTrue(status.isPresent());
-            assertEquals("FAILED", status.get().getStatus());
-        });
+        awaitStatus(runId, "FAILED");
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertNotNull(finalStatus.getErrorMessage());
@@ -189,11 +180,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
-            Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
-            assertTrue(status.isPresent());
-            assertEquals("FAILED", status.get().getStatus());
-        });
+        awaitStatus(runId, "FAILED");
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertTrue(finalStatus.getErrorMessage().contains("Cucumber crashed"));
@@ -298,11 +285,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
-            Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
-            assertTrue(status.isPresent());
-            assertEquals("COMPLETED", status.get().getStatus());
-        });
+        awaitStatus(runId, "COMPLETED");
 
         assertTrue(testExecutionService.deleteTestExecution(runId));
         assertFalse(testExecutionService.getTestStatus(runId).isPresent());
@@ -486,6 +469,54 @@ class TestExecutionServiceTest {
         }
     }
 
+    // --- sortSuitesNewestFirst tests (private method via reflection) ---
+
+    private void sortSuitesNewestFirst(Path reportDir) throws Exception {
+        Method method = TestExecutionService.class.getDeclaredMethod("sortSuitesNewestFirst", Path.class);
+        method.setAccessible(true);
+        method.invoke(testExecutionService, reportDir);
+    }
+
+    @Test
+    void sortSuitesNewestFirst_WidgetAndDataSuites_OrderedNewestFirst(@TempDir Path tempDir) throws Exception {
+        Path widgetsDir = Files.createDirectories(tempDir.resolve("widgets"));
+        Path dataDir = Files.createDirectories(tempDir.resolve("data"));
+
+        Files.writeString(widgetsDir.resolve("suites.json"), """
+                {
+                  "total": 2,
+                  "items": [
+                    {"uid": "a", "name": "202602231349 938da71e @Frontend"},
+                    {"uid": "b", "name": "202607271559 f3dbe6c2 @Backend"}
+                  ]
+                }""");
+        Files.writeString(dataDir.resolve("suites.json"), """
+                {
+                  "uid": "root",
+                  "name": "suites",
+                  "children": [
+                    {"name": "202602231349 938da71e @Frontend", "children": []},
+                    {"name": "202607271559 f3dbe6c2 @Backend", "children": []}
+                  ]
+                }""");
+
+        sortSuitesNewestFirst(tempDir);
+
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode widgetItems = mapper.readTree(widgetsDir.resolve("suites.json").toFile()).get("items");
+        assertEquals("202607271559 f3dbe6c2 @Backend", widgetItems.get(0).get("name").asText());
+        assertEquals("202602231349 938da71e @Frontend", widgetItems.get(1).get("name").asText());
+
+        JsonNode dataChildren = mapper.readTree(dataDir.resolve("suites.json").toFile()).get("children");
+        assertEquals("202607271559 f3dbe6c2 @Backend", dataChildren.get(0).get("name").asText());
+        assertEquals("202602231349 938da71e @Frontend", dataChildren.get(1).get("name").asText());
+    }
+
+    @Test
+    void sortSuitesNewestFirst_MissingFiles_DoesNotThrow(@TempDir Path tempDir) {
+        assertDoesNotThrow(() -> sortSuitesNewestFirst(tempDir));
+    }
+
     // --- readTagsFromExecutorJson tests (private method via reflection) ---
 
     private String readTagsFromExecutorJson(Path dir) throws Exception {
@@ -550,62 +581,35 @@ class TestExecutionServiceTest {
 
     // --- reportUrls: accessibility nur für Frontend-Tests ---
 
-    @Test
-    void execution_BackendOnlyTags_NoAccessibilityUrl() throws Exception {
+    @ParameterizedTest(name = "tags={0} -> accessibility present={1}")
+    @MethodSource("accessibilityUrlCases")
+    void execution_TagsDetermineAccessibilityUrlPresence(List<String> tags, boolean expectPresent) throws Exception {
         when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
-                .thenReturn(new CucumberRunnerService.RunResult("id", "@Backend", 0, "out"));
+                .thenReturn(new CucumberRunnerService.RunResult("id", tags.get(0), 0, "out"));
 
-        TestExecutionRequest request = createRequest("dev", List.of("@Backend"));
+        TestExecutionRequest request = createRequest("dev", tags);
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
-            Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
-            assertTrue(status.isPresent());
-            assertEquals("COMPLETED", status.get().getStatus());
-        });
+        awaitStatus(runId, "COMPLETED");
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
-        assertFalse(urls.containsKey("accessibility"),
-                "Backend-only run must not contain an accessibility URL");
+        assertEquals(expectPresent, urls.containsKey("accessibility"));
+    }
+
+    private static Stream<Arguments> accessibilityUrlCases() {
+        return Stream.of(
+                Arguments.of(List.of("@Backend"), false),
+                Arguments.of(List.of("@API-Test"), false),
+                Arguments.of(List.of("@Backend", "@API-Test"), false),
+                Arguments.of(List.of("@Frontend"), true),
+                // @SmokeTest includes both UI and API tests -> accessibility URL expected
+                Arguments.of(List.of("@SmokeTest"), true)
+        );
     }
 
     @Test
-    void execution_ApiTestOnlyTag_NoAccessibilityUrl() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
-                .thenReturn(new CucumberRunnerService.RunResult("id", "@API-Test", 0, "out"));
-
-        TestExecutionRequest request = createRequest("dev", List.of("@API-Test"));
-        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
-        UUID runId = response.getRunId();
-
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
-                        .orElseThrow().getStatus()));
-
-        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
-        assertFalse(urls.containsKey("accessibility"));
-    }
-
-    @Test
-    void execution_BackendAndApiTestTags_NoAccessibilityUrl() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
-                .thenReturn(new CucumberRunnerService.RunResult("id", "@Backend", 0, "out"));
-
-        TestExecutionRequest request = createRequest("dev", List.of("@Backend", "@API-Test"));
-        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
-        UUID runId = response.getRunId();
-
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
-                        .orElseThrow().getStatus()));
-
-        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
-        assertFalse(urls.containsKey("accessibility"));
-    }
-
-    @Test
-    void execution_FrontendTag_HasAccessibilityUrl() throws Exception {
+    void execution_FrontendTag_AccessibilityUrlPointsToAxeResult() throws Exception {
         when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@Frontend", 0, "out"));
 
@@ -613,31 +617,10 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
-                        .orElseThrow().getStatus()));
+        awaitStatus(runId, "COMPLETED");
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
-        assertTrue(urls.containsKey("accessibility"));
         assertTrue(urls.get("accessibility").contains("/axe-result/index.html"));
-    }
-
-    @Test
-    void execution_SmokeTestTag_HasAccessibilityUrl() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
-                .thenReturn(new CucumberRunnerService.RunResult("id", "@SmokeTest", 0, "out"));
-
-        // @SmokeTest includes both UI and API tests → accessibility URL expected
-        TestExecutionRequest request = createRequest("dev", List.of("@SmokeTest"));
-        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
-        UUID runId = response.getRunId();
-
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
-                        .orElseThrow().getStatus()));
-
-        Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
-        assertTrue(urls.containsKey("accessibility"));
     }
 
     // --- reportUrls: einheitliche /reports/** Pfade ---
@@ -651,9 +634,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
-                        .orElseThrow().getStatus()));
+        awaitStatus(runId, "COMPLETED");
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
 
@@ -693,9 +674,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertEquals("COMPLETED", testExecutionService.getTestStatus(runId)
-                        .orElseThrow().getStatus()));
+        awaitStatus(runId, "COMPLETED");
 
         String duration = testExecutionService.getTestStatus(runId).orElseThrow().getDuration();
         assertNotNull(duration);

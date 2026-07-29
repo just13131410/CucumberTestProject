@@ -1,5 +1,9 @@
 package org.example.cucumber.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.qameta.allure.ConfigurationBuilder;
 import io.qameta.allure.ReportGenerator;
 import org.example.CucumberRunnerService;
@@ -447,6 +451,40 @@ public class TestExecutionService {
         generator.generate(outputDir, resultDirs);
     }
 
+    /**
+     * Allure gruppiert Suites intern in einer vom Dateisystem abhängigen, nicht chronologischen
+     * Reihenfolge. Da jeder Suite-Name mit dem in {@link #copyAndEnrichResults} erzeugten Präfix
+     * {@code yyyyMMddHHmm} beginnt, wird hier absteigend nach Namen sortiert, damit im Overview-
+     * Widget und auf der Suites-Seite der neueste Run zuerst erscheint.
+     */
+    private void sortSuitesNewestFirst(Path reportDir) {
+        ObjectMapper mapper = new ObjectMapper();
+        sortJsonArrayFieldDescendingByName(mapper, reportDir.resolve("widgets").resolve("suites.json"), "items");
+        sortJsonArrayFieldDescendingByName(mapper, reportDir.resolve("data").resolve("suites.json"), "children");
+    }
+
+    private void sortJsonArrayFieldDescendingByName(ObjectMapper mapper, Path jsonFile, String arrayField) {
+        if (!Files.exists(jsonFile)) {
+            return;
+        }
+        try {
+            ObjectNode root = (ObjectNode) mapper.readTree(jsonFile.toFile());
+            JsonNode arrayNode = root.get(arrayField);
+            if (!(arrayNode instanceof ArrayNode array)) {
+                return;
+            }
+            List<JsonNode> items = new ArrayList<>();
+            array.forEach(items::add);
+            items.sort(Comparator.comparing((JsonNode n) -> n.path("name").asText("")).reversed());
+            ArrayNode sorted = mapper.createArrayNode();
+            sorted.addAll(items);
+            root.set(arrayField, sorted);
+            mapper.writeValue(jsonFile.toFile(), root);
+        } catch (IOException e) {
+            log.warn("Failed to sort suites JSON {}: {}", jsonFile, e.getMessage());
+        }
+    }
+
     public Optional<String> getReportUrl(UUID runId) {
         Path allureReportDir = getResultsPath(runId).resolve("allure-report");
         if (Files.exists(allureReportDir) && Files.exists(allureReportDir.resolve("index.html"))) {
@@ -591,6 +629,7 @@ public class TestExecutionService {
                     .map(run -> resolvedTempDir.resolve(run.id().toString()))
                     .collect(Collectors.toList());
             generateWithJavaApi(combinedReportDir, resultDirs);
+            sortSuitesNewestFirst(combinedReportDir);
 
             Path indexHtml = combinedReportDir.resolve("index.html");
             if (Files.exists(indexHtml)) {
@@ -630,15 +669,7 @@ public class TestExecutionService {
     }
 
     private Path getResultsPath(UUID runId) {
-        String envPath = System.getenv("TEST_RESULTS_PATH");
-        if (envPath != null && !envPath.isBlank()) {
-            return Path.of(envPath, runId.toString());
-        }
-        String sysProp = System.getProperty("test.results.path");
-        if (sysProp != null && !sysProp.isBlank()) {
-            return Path.of(sysProp, runId.toString());
-        }
-        return Path.of("test-results", runId.toString());
+        return getBaseResultsPath().resolve(runId.toString());
     }
 
     private void deleteDirectory(Path dir) throws IOException {
@@ -709,15 +740,8 @@ public class TestExecutionService {
         }
 
         // Write executor.json for this run
-        String executorJson = String.format("""
-                {
-                  "name": "Cucumber Test Service",
-                  "type": "api",
-                  "buildName": "%s",
-                  "buildOrder": %d,
-                  "reportUrl": "/reports/%s/allure-report/index.html"
-                }""", suiteLabel, buildOrder, runId);
-        Files.writeString(targetDir.resolve("executor.json"), executorJson);
+        Files.writeString(targetDir.resolve("executor.json"),
+                buildExecutorJson(suiteLabel, buildOrder, null, runId.toString()));
     }
 
     private String readTagsFromExecutorJson(Path allureResultsDir) {
@@ -765,25 +789,28 @@ public class TestExecutionService {
             String buildName = "Run " + runId.toString().substring(0, 8);
             String env = request.getEnvironment() != null ? request.getEnvironment() : "unknown";
             String tags = request.getTags() != null ? String.join(", ", request.getTags()) : "";
+            String reportName = String.format("%s [%s] %s", buildName, env, tags);
 
-            String executorJson = String.format("""
-                    {
-                      "name": "Cucumber Test Service",
-                      "type": "api",
-                      "buildName": "%s",
-                      "buildOrder": %d,
-                      "reportName": "%s [%s] %s",
-                      "reportUrl": "/reports/%s/allure-report/index.html"
-                    }""",
-                    buildName,
-                    System.currentTimeMillis(),
-                    buildName, env, tags,
-                    runId);
-
-            Files.writeString(allureResultsDir.resolve("executor.json"), executorJson);
+            Files.writeString(allureResultsDir.resolve("executor.json"),
+                    buildExecutorJson(buildName, System.currentTimeMillis(), reportName, runId.toString()));
         } catch (IOException e) {
             log.warn("Failed to write executor.json for runId={}", runId, e);
         }
+    }
+
+    /** Builds the JSON content for Allure's executor.json. {@code reportName} is omitted when null. */
+    private String buildExecutorJson(String buildName, long buildOrder, String reportName, String runId) {
+        String reportNameField = reportName != null
+                ? String.format("\"reportName\": \"%s\",%n  ", reportName)
+                : "";
+        return String.format("""
+                {
+                  "name": "Cucumber Test Service",
+                  "type": "api",
+                  "buildName": "%s",
+                  "buildOrder": %d,
+                  %s"reportUrl": "/reports/%s/allure-report/index.html"
+                }""", buildName, buildOrder, reportNameField, runId);
     }
 
     private void copyHistory(Path sourceReportDir, Path targetResultsDir) {

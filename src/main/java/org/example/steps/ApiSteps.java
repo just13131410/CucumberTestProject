@@ -278,7 +278,7 @@ public class ApiSteps {
         Allure.step("Todo-API Basis-URL gesetzt auf: " + this.todoApiUrl);
     }
 
-    @When("ich mich mit Benutzernaaaaaaame {string} und Passwort {string} einlogge")
+    @When("ich mich an der Todo-API mit Benutzername {string} und Passwort {string} anmelde")
     public void loginWithCredentials(String username, String password) {
         response = todoRequest()
                 .contentType("application/json")

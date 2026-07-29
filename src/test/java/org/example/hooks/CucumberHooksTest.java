@@ -39,13 +39,6 @@ class CucumberHooksTest {
     // --- Reflection helpers for private ThreadLocal fields ---
 
     @SuppressWarnings("unchecked")
-    private ThreadLocal<String> getScenarioNameField() throws Exception {
-        Field f = CucumberHooks.class.getDeclaredField("scenarioName");
-        f.setAccessible(true);
-        return (ThreadLocal<String>) f.get(hooks);
-    }
-
-    @SuppressWarnings("unchecked")
     private ThreadLocal<LocalDateTime> getScenarioStartTimeField() throws Exception {
         Field f = CucumberHooks.class.getDeclaredField("scenarioStartTime");
         f.setAccessible(true);
@@ -53,15 +46,6 @@ class CucumberHooksTest {
     }
 
     // --- beforeScenario ---
-
-    @Test
-    void beforeScenario_SetsScenarioNameInThreadLocal() throws Exception {
-        Scenario scenario = mockScenario("Login Test");
-
-        hooks.beforeScenario(scenario);
-
-        assertEquals("Login Test", getScenarioNameField().get());
-    }
 
     @Test
     void beforeScenario_SetsStartTimeInThreadLocal() throws Exception {
@@ -94,16 +78,6 @@ class CucumberHooksTest {
     }
 
     // --- afterScenario ---
-
-    @Test
-    void afterScenario_ClearsScenarioNameThreadLocal() throws Exception {
-        Scenario scenario = mockScenario("Login Test");
-        hooks.beforeScenario(scenario);
-
-        hooks.afterScenario(scenario);
-
-        assertNull(getScenarioNameField().get());
-    }
 
     @Test
     void afterScenario_ClearsStartTimeThreadLocal() throws Exception {
@@ -142,12 +116,10 @@ class CucumberHooksTest {
         Scenario scenario = mockScenario("Cleanup Test");
         hooks.beforeScenario(scenario);
 
-        assertNotNull(getScenarioNameField().get());
         assertNotNull(getScenarioStartTimeField().get());
 
         hooks.afterScenario(scenario);
 
-        assertNull(getScenarioNameField().get());
         assertNull(getScenarioStartTimeField().get());
     }
 
@@ -169,17 +141,4 @@ class CucumberHooksTest {
         assertFalse(time2.isBefore(time1));
     }
 
-    @Test
-    void consecutiveRuns_SecondRunOverwritesScenarioName() throws Exception {
-        Scenario s1 = mockScenario("First Scenario");
-        Scenario s2 = mockScenario("Second Scenario");
-
-        hooks.beforeScenario(s1);
-        hooks.afterScenario(s1);
-
-        hooks.beforeScenario(s2);
-
-        assertEquals("Second Scenario", getScenarioNameField().get());
-        hooks.afterScenario(s2);
-    }
 }

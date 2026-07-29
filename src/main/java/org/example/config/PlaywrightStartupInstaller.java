@@ -27,10 +27,12 @@ public class PlaywrightStartupInstaller implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (!PlaywrightMirrorConfig.isMirrorEnabled() || !PlaywrightMirrorConfig.isInstallOnStartup()) {
+        boolean mirrorEnabled = PlaywrightMirrorConfig.isMirrorEnabled();
+        boolean installOnStartup = PlaywrightMirrorConfig.isInstallOnStartup();
+        if (!mirrorEnabled || !installOnStartup) {
             log.debug("Playwright-Browser-Download beim Start übersprungen "
                     + "(mirror.enabled={}, install.on-startup={}).",
-                    PlaywrightMirrorConfig.isMirrorEnabled(), PlaywrightMirrorConfig.isInstallOnStartup());
+                    mirrorEnabled, installOnStartup);
             return;
         }
 

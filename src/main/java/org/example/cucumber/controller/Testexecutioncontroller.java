@@ -39,6 +39,8 @@ import java.util.UUID;
 @Tag(name = "Test Execution", description = "API für Cucumber Test Ausführung")
 public class TestExecutionController {
 
+    private static final String RUN_NOT_FOUND = "Test-Ausführung nicht gefunden";
+
     private final TestExecutionService testExecutionService;
 
     /**
@@ -90,7 +92,7 @@ public class TestExecutionController {
             description = "Ruft den aktuellen Status einer Test-Ausführung ab")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Status erfolgreich abgerufen"),
-            @ApiResponse(responseCode = "404", description = "Test-Ausführung nicht gefunden")
+            @ApiResponse(responseCode = "404", description = RUN_NOT_FOUND)
     })
     public ResponseEntity<TestStatus> getTestStatus(
             @Parameter(description = "Test Run ID", required = true)
@@ -162,7 +164,7 @@ public class TestExecutionController {
             description = "Generiert einen Allure-Report für die angegebene Test-Ausführung und gibt die URL zurück")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Report erfolgreich generiert"),
-            @ApiResponse(responseCode = "404", description = "Test-Ausführung nicht gefunden"),
+            @ApiResponse(responseCode = "404", description = RUN_NOT_FOUND),
             @ApiResponse(responseCode = "500", description = "Fehler bei der Report-Generierung")
     })
     public ResponseEntity<Map<String, String>> generateAllureReport(
@@ -217,7 +219,7 @@ public class TestExecutionController {
             description = "Bricht eine laufende Test-Ausführung ab")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Test erfolgreich abgebrochen"),
-            @ApiResponse(responseCode = "404", description = "Test-Ausführung nicht gefunden"),
+            @ApiResponse(responseCode = "404", description = RUN_NOT_FOUND),
             @ApiResponse(responseCode = "409", description = "Test kann nicht abgebrochen werden")
     })
     public ResponseEntity<TestStatus> cancelTestExecution(

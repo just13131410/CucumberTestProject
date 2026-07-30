@@ -22,7 +22,6 @@ import java.util.stream.Collectors;
 public class ZephyrScaleService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final String FOLDER_TYPE = "TEST_RUN";
 
     private final ZephyrScaleClient zephyrClient;
     private final JiraClient jiraClient;
@@ -34,6 +33,14 @@ public class ZephyrScaleService {
 
     @Value("${zephyr.default-project-key:}")
     private String defaultProjectKey;
+
+    /** Key des Testruns, dessen Testfaelle in jeden neu angelegten Testrun geklont werden. */
+    @Value("${zephyr.template-test-run-key:}")
+    private String templateTestRunKey;
+
+    /** Zephyr-Folder-Pfad (String, z.B. "/Testautomation/Smoketest"), dem der neue Testrun zugeordnet wird. */
+    @Value("${zephyr.result-folder:}")
+    private String resultFolder;
 
     @Value("${jira.enabled:false}")
     private boolean jiraEnabled;
@@ -111,11 +118,9 @@ public class ZephyrScaleService {
 
     private void uploadToZephyr(UUID runId, TestExecutionRequest request, int exitCode,
                                 TestStatus status, String projectKey) {
-        Long folderId = getOrCreateFolder(projectKey, request);
-
-        String cycleKey = createCycle(runId, request, projectKey, folderId);
+        String cycleKey = createCycle(runId, request, projectKey);
         if (cycleKey == null) {
-            log.warn("Failed to create Zephyr test cycle for runId={}", runId);
+            log.warn("Failed to create Zephyr test run for runId={}", runId);
             return;
         }
 
@@ -137,37 +142,7 @@ public class ZephyrScaleService {
         return defaultProjectKey;
     }
 
-    private Long getOrCreateFolder(String projectKey, TestExecutionRequest request) {
-        String folderName = resolveFolderName(request);
-        List<ZephyrFolder> folders = zephyrClient.getFolders(projectKey, FOLDER_TYPE);
-        Optional<ZephyrFolder> existing = folders.stream()
-                .filter(f -> folderName.equals(f.getName()))
-                .findFirst();
-        if (existing.isPresent()) {
-            return existing.get().getId();
-        }
-        ZephyrFolder created = zephyrClient.createFolder(folderName, projectKey, FOLDER_TYPE);
-        return created != null ? created.getId() : null;
-    }
-
-    String resolveFolderName(TestExecutionRequest request) {
-        if (request.getTags() == null) return "Default";
-        for (String tag : request.getTags()) {
-            String normalized = tag.startsWith("@") ? tag.substring(1) : tag;
-            if ("SmokeTest".equalsIgnoreCase(normalized) || "smoke".equalsIgnoreCase(normalized)) {
-                return "SmokeTest";
-            }
-            if ("Frontend".equalsIgnoreCase(normalized)) {
-                return "Frontend";
-            }
-            if ("Backend".equalsIgnoreCase(normalized)) {
-                return "Backend";
-            }
-        }
-        return "Default";
-    }
-
-    private String createCycle(UUID runId, TestExecutionRequest request, String projectKey, Long folderId) {
+    private String createCycle(UUID runId, TestExecutionRequest request, String projectKey) {
         String shortRunId = runId.toString().substring(0, 8);
         String tags = request.getTags() != null ? String.join(" ", request.getTags()) : "";
         String date = LocalDate.now().format(DATE_FMT);
@@ -176,12 +151,38 @@ public class ZephyrScaleService {
         Map<String, Object> body = new HashMap<>();
         body.put("name", cycleName);
         body.put("projectKey", projectKey);
-        if (folderId != null) {
-            body.put("folderId", folderId);
+        if (resultFolder != null && !resultFolder.isBlank()) {
+            body.put("folder", resultFolder);
+        }
+        List<Map<String, String>> clonedItems = cloneTestCaseItems();
+        if (!clonedItems.isEmpty()) {
+            body.put("items", clonedItems);
         }
 
         ZephyrTestCycle cycle = zephyrClient.createTestCycle(body);
         return cycle != null ? cycle.getKey() : null;
+    }
+
+    /**
+     * Liest die Testfaelle des konfigurierten Template-Testruns ({@code zephyr.template-test-run-key})
+     * und baut daraus die "items"-Liste fuer POST /testrun, damit der neu angelegte Testrun
+     * dieselben Testfaelle enthaelt ("klonen"). Ohne konfigurierten Template-Key oder falls der
+     * Template-Testrun nicht lesbar ist, wird der neue Testrun ohne vorbelegte Testfaelle angelegt.
+     */
+    private List<Map<String, String>> cloneTestCaseItems() {
+        if (templateTestRunKey == null || templateTestRunKey.isBlank()) {
+            return List.of();
+        }
+        ZephyrTestRun template = zephyrClient.getTestRun(templateTestRunKey);
+        if (template == null || template.getItems() == null) {
+            log.warn("Template-Testrun '{}' nicht gefunden oder enthaelt keine Testfaelle", templateTestRunKey);
+            return List.of();
+        }
+        return template.getItems().stream()
+                .map(ZephyrTestRunItem::getTestCaseKey)
+                .filter(Objects::nonNull)
+                .map(key -> Map.of("testCaseKey", key))
+                .collect(Collectors.toList());
     }
 
     private void createJiraTicket(UUID runId, TestExecutionRequest request,

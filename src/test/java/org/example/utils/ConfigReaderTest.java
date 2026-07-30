@@ -117,6 +117,35 @@ class ConfigReaderTest {
         assertEquals("fallback", result);
     }
 
+    // --- Trimming (unsichtbare \r/Whitespace aus .env/System-Property) ---
+
+    @Test
+    void get_SystemPropertyWithTrailingCarriageReturn_IsTrimmed() {
+        // Simuliert eine Windows-Zeilenende-.env-Datei: ein \r haengt unsichtbar am Wert.
+        System.setProperty("testKey", "geheimtoken123\r");
+
+        String result = ConfigReader.get("testKey", "default");
+
+        assertEquals("geheimtoken123", result, "trailing \\r muss entfernt werden");
+    }
+
+    @Test
+    void get_SystemPropertyWithSurroundingWhitespace_IsTrimmed() {
+        System.setProperty("testKey", "  max.mustermann  ");
+
+        String result = ConfigReader.get("testKey", "default");
+
+        assertEquals("max.mustermann", result);
+    }
+
+    @Test
+    void get_DefaultValue_IsNotTrimmed() {
+        // Default-Werte sind Konstanten im Code, keine Datei-Eingabe - werden bewusst nicht angefasst.
+        String result = ConfigReader.get("nonExistentKey", "  default  ");
+
+        assertEquals("  default  ", result);
+    }
+
     // --- getWithSource Tests ---
 
     @Test

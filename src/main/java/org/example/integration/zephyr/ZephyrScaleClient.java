@@ -2,17 +2,15 @@ package org.example.integration.zephyr;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.integration.AbstractAtlassianClient;
-import org.example.integration.model.ZephyrFolder;
 import org.example.integration.model.ZephyrTestCycle;
 import org.example.integration.model.ZephyrTestExecution;
+import org.example.integration.model.ZephyrTestRun;
 import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.List;
 import java.util.Map;
@@ -37,32 +35,15 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
         super(restTemplate, baseUrl, username, apiToken);
     }
 
-    public List<ZephyrFolder> getFolders(String projectKey, String folderType) {
-        String url = UriComponentsBuilder
-                .fromUriString(baseUrl + ATM_BASE + "/folder")
-                .queryParam("projectKey", projectKey)
-                .queryParam("folderType", folderType)
-                .toUriString();
+    /** Liest einen bestehenden Testrun (samt enthaltener Testfaelle in {@code items}). */
+    public ZephyrTestRun getTestRun(String testRunKey) {
+        String url = baseUrl + ATM_BASE + "/testrun/" + testRunKey;
         try {
-            ResponseEntity<List<ZephyrFolder>> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(buildHeaders()),
-                    new ParameterizedTypeReference<>() {});
-            return response.getBody() != null ? response.getBody() : List.of();
-        } catch (HttpStatusCodeException e) {
-            log.error("Zephyr getFolders failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
-            return List.of();
-        }
-    }
-
-    public ZephyrFolder createFolder(String name, String projectKey, String folderType) {
-        String url = baseUrl + ATM_BASE + "/folder";
-        Map<String, String> body = Map.of("name", name, "projectKey", projectKey, "folderType", folderType);
-        try {
-            ResponseEntity<ZephyrFolder> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(body, buildHeaders()), ZephyrFolder.class);
+            ResponseEntity<ZephyrTestRun> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(buildHeaders()), ZephyrTestRun.class);
             return response.getBody();
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr createFolder failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr getTestRun failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
             return null;
         }
     }
@@ -78,7 +59,7 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
             }
             return cycle;
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr createTestCycle failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr createTestCycle failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
             return null;
         }
     }
@@ -92,7 +73,7 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
                     log.info("Zephyr Execution uploaded: testCaseKey={}, status={}",
                             e.getTestCaseKey(), e.getStatusName()));
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr uploadTestResults failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr uploadTestResults failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
         }
     }
 }

@@ -22,7 +22,10 @@ public abstract class AbstractAtlassianClient {
 
     protected AbstractAtlassianClient(RestTemplate restTemplate, String baseUrl, String username, String apiToken) {
         this.restTemplate = restTemplate;
-        this.baseUrl = baseUrl;
+        // Abschliessende(n) Slash(es) entfernen: baseUrl + "/rest/..." ergaebe sonst einen
+        // doppelten Slash ("https://host//rest/..."), den manche Reverse-Proxies/WAFs vor der
+        // eigentlichen Jira-Anwendung mit 403 abweisen - unabhaengig von gueltigen Credentials.
+        this.baseUrl = baseUrl != null ? baseUrl.replaceAll("/+$", "") : baseUrl;
         String credentials = username + ":" + apiToken;
         this.authHeader = "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
     }

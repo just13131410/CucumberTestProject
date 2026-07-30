@@ -4,13 +4,11 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/** Ein Testfall-Eintrag innerhalb eines {@link ZephyrTestRun}. */
 @Data
 @NoArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ZephyrFolder {
+public class ZephyrTestRunItem {
 
-    private Long id;
-    private String name;
-    private String projectKey;
-    private String folderType;
+    private String testCaseKey;
 }

@@ -116,34 +116,44 @@ public class ConfigReader {
         String envValue = System.getenv(envKey);
         if (envValue != null) {
             log.debug("Key '{}' bezogen aus: Umgebungsvariable ({})", key, envKey);
-            return new ResolvedValue(envValue, "Umgebungsvariable (" + envKey + ")");
+            return new ResolvedValue(trim(envValue), "Umgebungsvariable (" + envKey + ")");
         }
 
         String sysProp = System.getProperty(key);
         if (sysProp != null) {
             log.debug("Key '{}' bezogen aus: System-Property (-D{})", key, key);
-            return new ResolvedValue(sysProp, "System-Property (-D" + key + ")");
+            return new ResolvedValue(trim(sysProp), "System-Property (-D" + key + ")");
         }
 
         String dotenvValue = dotenv.get(envKey, null);
         if (dotenvValue != null) {
             log.debug("Key '{}' bezogen aus: .env-Datei", key);
-            return new ResolvedValue(dotenvValue, ".env-Datei");
+            return new ResolvedValue(trim(dotenvValue), ".env-Datei");
         }
 
         String secretValue = secretProperties.getProperty(key);
         if (secretValue != null) {
             log.debug("Key '{}' bezogen aus: Secret-Datei (CONFIGPATH)", key);
-            return new ResolvedValue(secretValue, "Secret-Datei (CONFIGPATH)");
+            return new ResolvedValue(trim(secretValue), "Secret-Datei (CONFIGPATH)");
         }
 
         String propValue = properties.getProperty(key);
         if (propValue != null) {
             log.debug("Key '{}' bezogen aus: config.properties (Classpath)", key);
-            return new ResolvedValue(propValue, "config.properties (Classpath)");
+            return new ResolvedValue(trim(propValue), "config.properties (Classpath)");
         }
 
         log.debug("Key '{}' nicht gefunden – verwende Default: '{}'", key, defaultValue);
         return new ResolvedValue(defaultValue, "Default");
+    }
+
+    /**
+     * Entfernt fuehrende/abschliessende Whitespaces (inkl. \r von Windows-Zeilenenden in .env-
+     * Dateien). Ohne das koennte z.B. ein unsichtbares \r am Ende eines Tokens aus der .env
+     * mit ins Basic-Auth-Encoding wandern und die Anmeldung mit einem kaum diagnostizierbaren
+     * Fehler scheitern lassen.
+     */
+    private static String trim(String value) {
+        return value == null ? null : value.strip();
     }
 }

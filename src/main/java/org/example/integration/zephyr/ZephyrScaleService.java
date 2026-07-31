@@ -11,6 +11,8 @@ import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -132,6 +134,26 @@ public class ZephyrScaleService {
             StatusMetadataSupport.addMetadata(status, "zephyrExecutions", executions.stream()
                     .map(ZephyrTestExecution::getTestCaseKey)
                     .collect(Collectors.toList()));
+        }
+
+        uploadReportAttachments(runId, cycleKey);
+    }
+
+    /**
+     * Haengt Cucumber- und Axe-Report des Gesamtlaufs einmalig an den Test-Cycle an (nicht an
+     * einzelne Testergebnisse, da beide Reports den kompletten Run abdecken).
+     */
+    private void uploadReportAttachments(UUID runId, String cycleKey) {
+        Path basePath = cucumberResultReader.getResultsBasePath(runId);
+        attachIfExists(cycleKey, basePath.resolve("cucumber-reports").resolve("Cucumber.html"));
+        attachIfExists(cycleKey, basePath.resolve("axe-result").resolve("index.html"));
+    }
+
+    private void attachIfExists(String cycleKey, Path file) {
+        if (Files.exists(file)) {
+            zephyrClient.uploadAttachment(cycleKey, file);
+        } else {
+            log.debug("Report-Datei fuer Zephyr-Attachment nicht gefunden: {}", file);
         }
     }
 

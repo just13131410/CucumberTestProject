@@ -5,11 +5,14 @@ import org.example.integration.jira.JiraClient;
 import org.example.integration.model.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +76,22 @@ class ZephyrScaleClientTest {
                         .build());
 
         zephyrClient.uploadTestResults("T-R42", executions);
+
+        mockServer.verify();
+    }
+
+    @Test
+    void uploadAttachment_SendsMultipartFileToCycle(@TempDir Path tempDir) throws Exception {
+        Path report = tempDir.resolve("Cucumber.html");
+        Files.writeString(report, "<html></html>");
+
+        mockServer.expect(requestTo(BASE_URL + "/rest/atm/1.0/testrun/T-R42/attachments"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", AUTH_HEADER))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.MULTIPART_FORM_DATA))
+                .andRespond(withSuccess());
+
+        zephyrClient.uploadAttachment("T-R42", report);
 
         mockServer.verify();
     }

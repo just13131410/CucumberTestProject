@@ -213,6 +213,41 @@ class ZephyrScaleServiceTest {
         }
     }
 
+    // --- Report-Attachments (Cucumber-/Axe-Report auf Cycle-Ebene) ---
+
+    @Test
+    void uploadRunResults_ReportFilesExist_AttachesBothToCycle(@TempDir Path tempDir) throws IOException {
+        UUID runId = UUID.randomUUID();
+        Path runDir = tempDir.resolve(runId.toString());
+        Files.createDirectories(runDir.resolve("cucumber-reports"));
+        Files.createDirectories(runDir.resolve("axe-result"));
+        Path cucumberHtml = runDir.resolve("cucumber-reports").resolve("Cucumber.html");
+        Path axeIndex = runDir.resolve("axe-result").resolve("index.html");
+        Files.writeString(cucumberHtml, "<html>cucumber</html>");
+        Files.writeString(axeIndex, "<html>axe</html>");
+
+        System.setProperty("test.results.path", tempDir.toString());
+        try {
+            stubCycle("T-R5");
+
+            service.uploadRunResults(runId, createRequest(List.of("@Backend")), 0, new TestStatus());
+
+            verify(zephyrClient).uploadAttachment("T-R5", cucumberHtml);
+            verify(zephyrClient).uploadAttachment("T-R5", axeIndex);
+        } finally {
+            System.clearProperty("test.results.path");
+        }
+    }
+
+    @Test
+    void uploadRunResults_ReportFilesMissing_NoAttachmentUpload() {
+        stubCycle("T-R6");
+
+        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@Backend")), 0, new TestStatus());
+
+        verify(zephyrClient, never()).uploadAttachment(any(), any());
+    }
+
     // --- Fallback mode ---
 
     @Test

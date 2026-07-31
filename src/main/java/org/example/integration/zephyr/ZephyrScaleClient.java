@@ -7,11 +7,15 @@ import org.example.integration.model.ZephyrTestExecution;
 import org.example.integration.model.ZephyrTestRun;
 import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -74,6 +78,21 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
                             e.getTestCaseKey(), e.getStatus()));
         } catch (HttpStatusCodeException e) {
             log.error("Zephyr uploadTestResults failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
+        }
+    }
+
+    /** Haengt eine Datei (z.B. Cucumber-/Axe-Report) an den Test-Cycle an (nicht an einzelne Testergebnisse). */
+    public void uploadAttachment(String cycleKey, Path file) {
+        String url = baseUrl + ATM_BASE + "/testrun/" + cycleKey + "/attachments";
+        try {
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("file", new FileSystemResource(file));
+
+            restTemplate.exchange(url, HttpMethod.POST,
+                    new HttpEntity<>(body, buildHeaders(MediaType.MULTIPART_FORM_DATA)), Void.class);
+            log.info("Zephyr Attachment hochgeladen: cycleKey={}, file={}", cycleKey, file.getFileName());
+        } catch (HttpStatusCodeException e) {
+            log.error("Zephyr uploadAttachment failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
         }
     }
 }

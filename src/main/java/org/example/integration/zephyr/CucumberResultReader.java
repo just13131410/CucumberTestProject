@@ -59,11 +59,13 @@ public class CucumberResultReader {
                 for (CucumberElement element : feature.getElements()) {
                     String testCaseKey = extractTestCaseKey(element.getTags());
                     if (testCaseKey == null) continue;
-                    boolean allPassed = element.getSteps() != null && element.getSteps().stream()
+                    List<CucumberStep> steps = element.getSteps();
+                    boolean allPassed = steps != null && steps.stream()
                             .allMatch(s -> s.getResult() != null && "passed".equals(s.getResult().getStatus()));
                     executions.add(ZephyrTestExecution.builder()
                             .testCaseKey(testCaseKey)
                             .status(allPassed ? "Pass" : "Fail")
+                            .comment(buildStepComment(steps))
                             .build());
                 }
             }
@@ -72,6 +74,48 @@ public class CucumberResultReader {
             log.warn("Failed to parse Cucumber JSON at {}: {}", cucumberJson, e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Baut das Zephyr-Comment aus den Cucumber-Steps: bestandene Steps mit Haekchen, der
+     * fehlgeschlagene Step mit Kreuz + Fehlermeldung (erste Zeile), uebersprungene Steps markiert.
+     * Zeilenumbrueche als {@code <br>}, da das Zephyr-Comment-Feld HTML rendert.
+     */
+    private String buildStepComment(List<CucumberStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return null;
+        }
+        StringBuilder comment = new StringBuilder();
+        for (CucumberStep step : steps) {
+            if (comment.length() > 0) {
+                comment.append("<br>");
+            }
+            String stepText = escapeHtml(
+                    (step.getKeyword() != null ? step.getKeyword() : "")
+                            + (step.getName() != null ? step.getName() : ""));
+            String status = step.getResult() != null ? step.getResult().getStatus() : null;
+            if ("passed".equals(status)) {
+                comment.append("✅ ").append(stepText);
+            } else if ("failed".equals(status)) {
+                comment.append("❌ ").append(stepText);
+                String errorMessage = step.getResult().getErrorMessage();
+                if (errorMessage != null && !errorMessage.isBlank()) {
+                    comment.append("<br>&nbsp;&nbsp;&nbsp;Fehler: ").append(escapeHtml(firstLine(errorMessage)));
+                }
+            } else {
+                comment.append("⏭️ ").append(stepText);
+            }
+        }
+        return comment.toString();
+    }
+
+    private static String firstLine(String text) {
+        int idx = text.indexOf('\n');
+        return idx >= 0 ? text.substring(0, idx) : text;
+    }
+
+    private static String escapeHtml(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /**
@@ -89,7 +133,8 @@ public class CucumberResultReader {
                 .orElse(null);
     }
 
-    private Path getResultsBasePath(UUID runId) {
+    /** Oeffentlich, damit {@link ZephyrScaleService} darauf aufsetzende Report-Pfade (Attachments) ableiten kann. */
+    public Path getResultsBasePath(UUID runId) {
         String envPath = System.getenv("TEST_RESULTS_PATH");
         if (envPath != null && !envPath.isBlank()) {
             return Path.of(envPath, runId.toString());
@@ -133,6 +178,10 @@ public class CucumberResultReader {
     @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
     static class CucumberStep {
+        @JsonProperty("keyword")
+        private String keyword;
+        @JsonProperty("name")
+        private String name;
         @JsonProperty("result")
         private CucumberResult result;
     }
@@ -143,5 +192,7 @@ public class CucumberResultReader {
     static class CucumberResult {
         @JsonProperty("status")
         private String status;
+        @JsonProperty("error_message")
+        private String errorMessage;
     }
 }

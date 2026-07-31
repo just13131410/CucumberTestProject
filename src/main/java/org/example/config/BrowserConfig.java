@@ -9,43 +9,35 @@ import java.util.List;
 @Component
 public class BrowserConfig {
 
-    private static String executablePath = "";
-    private static List<String> extraArgs = List.of();
-    private static boolean headless = true;
+    private final String executablePath;
+    private final boolean headless;
+    private final List<String> extraArgs;
 
-    @Value("${browser.executable.path:}")
-    public void setExecutablePath(String path) {
-        BrowserConfig.executablePath = path;
-    }
-
-    @Value("${browser.headless:true}")
-    public void setHeadless(boolean value) {
-        BrowserConfig.headless = value;
-    }
-
-    @Value("${browser.extra.args:}")
-    public void setExtraArgs(String args) {
-        if (args != null && !args.isBlank()) {
-            BrowserConfig.extraArgs = Arrays.asList(args.split(","));
-        } else {
-            BrowserConfig.extraArgs = List.of();
-        }
+    public BrowserConfig(
+            @Value("${browser.executable.path:}") String executablePath,
+            @Value("${browser.headless:true}") boolean headless,
+            @Value("${browser.extra.args:}") String extraArgs) {
+        this.executablePath = executablePath;
+        this.headless = headless;
+        this.extraArgs = (extraArgs != null && !extraArgs.isBlank())
+                ? Arrays.asList(extraArgs.split(","))
+                : List.of();
     }
 
     /**
      * Gibt den konfigurierten Browser-Pfad zurück.
      * Leerer String bedeutet: Playwright nutzt seinen eingebetteten Browser-Download.
      */
-    public static String getExecutablePath() {
+    public String getExecutablePath() {
         return executablePath;
     }
 
-    public static boolean isHeadless() {
+    public boolean isHeadless() {
         return headless;
     }
 
     /** Gibt zusätzliche Browser-Launch-Argumente zurück (z.B. für Container-Umgebungen). */
-    public static List<String> getExtraArgs() {
+    public List<String> getExtraArgs() {
         return extraArgs;
     }
 }

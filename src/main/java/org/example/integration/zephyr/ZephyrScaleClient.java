@@ -1,74 +1,49 @@
 package org.example.integration.zephyr;
 
 import lombok.extern.slf4j.Slf4j;
-import org.example.integration.model.ZephyrFolder;
+import org.example.integration.AbstractAtlassianClient;
 import org.example.integration.model.ZephyrTestCycle;
 import org.example.integration.model.ZephyrTestExecution;
+import org.example.integration.model.ZephyrTestRun;
+import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
 @Slf4j
 @Component
-public class ZephyrScaleClient {
+public class ZephyrScaleClient extends AbstractAtlassianClient {
 
     private static final String ATM_BASE = "/rest/atm/1.0";
 
-    private final RestTemplate restTemplate;
-    private final String baseUrl;
-    private final String authHeader;
-
+    // zephyr.* Werte bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
+    // Spring's @Value liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
     @Autowired
-    public ZephyrScaleClient(
-            @Value("${zephyr.base-url:}") String baseUrl,
-            @Value("${zephyr.username:}") String username,
-            @Value("${zephyr.api-token:}") String apiToken) {
-        this(new RestTemplate(), baseUrl, username, apiToken);
+    public ZephyrScaleClient() {
+        this(new RestTemplate(),
+                ConfigReader.get("zephyr.base-url", "https://jira.yourcompany.com"),
+                ConfigReader.get("zephyr.username", ""),
+                ConfigReader.get("zephyr.api-token", ""));
     }
 
     public ZephyrScaleClient(RestTemplate restTemplate, String baseUrl, String username, String apiToken) {
-        this.restTemplate = restTemplate;
-        this.baseUrl = baseUrl;
-        String credentials = username + ":" + apiToken;
-        this.authHeader = "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
+        super(restTemplate, baseUrl, username, apiToken);
     }
 
-    public List<ZephyrFolder> getFolders(String projectKey, String folderType) {
-        String url = UriComponentsBuilder
-                .fromUriString(baseUrl + ATM_BASE + "/folder")
-                .queryParam("projectKey", projectKey)
-                .queryParam("folderType", folderType)
-                .toUriString();
+    /** Liest einen bestehenden Testrun (samt enthaltener Testfaelle in {@code items}). */
+    public ZephyrTestRun getTestRun(String testRunKey) {
+        String url = baseUrl + ATM_BASE + "/testrun/" + testRunKey;
         try {
-            ResponseEntity<List<ZephyrFolder>> response = restTemplate.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(buildHeaders()),
-                    new ParameterizedTypeReference<>() {});
-            return response.getBody() != null ? response.getBody() : List.of();
-        } catch (HttpStatusCodeException e) {
-            log.error("Zephyr getFolders failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
-            return List.of();
-        }
-    }
-
-    public ZephyrFolder createFolder(String name, String projectKey, String folderType) {
-        String url = baseUrl + ATM_BASE + "/folder";
-        Map<String, String> body = Map.of("name", name, "projectKey", projectKey, "folderType", folderType);
-        try {
-            ResponseEntity<ZephyrFolder> response = restTemplate.exchange(
-                    url, HttpMethod.POST, new HttpEntity<>(body, buildHeaders()), ZephyrFolder.class);
+            ResponseEntity<ZephyrTestRun> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(buildHeaders()), ZephyrTestRun.class);
             return response.getBody();
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr createFolder failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr getTestRun failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
             return null;
         }
     }
@@ -84,7 +59,7 @@ public class ZephyrScaleClient {
             }
             return cycle;
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr createTestCycle failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr createTestCycle failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
             return null;
         }
     }
@@ -96,16 +71,9 @@ public class ZephyrScaleClient {
                     new HttpEntity<>(executions, buildHeaders()), Void.class);
             executions.forEach(e ->
                     log.info("Zephyr Execution uploaded: testCaseKey={}, status={}",
-                            e.getTestCaseKey(), e.getStatusName()));
+                            e.getTestCaseKey(), e.getStatus()));
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr uploadTestResults failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr uploadTestResults failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
         }
-    }
-
-    private HttpHeaders buildHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.AUTHORIZATION, authHeader);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
     }
 }

@@ -1,96 +1,78 @@
 package org.example.config;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.parallel.Execution;
-import org.junit.jupiter.api.parallel.ExecutionMode;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-// BrowserConfig hält statischen Zustand; parallele Methoden würden sich gegenseitig stören.
-@Execution(ExecutionMode.SAME_THREAD)
 class BrowserConfigTest {
-
-    @AfterEach
-    void resetStaticState() {
-        BrowserConfig config = new BrowserConfig();
-        config.setExecutablePath("");
-        config.setHeadless(true);
-        config.setExtraArgs("");
-    }
 
     @Test
     void getExecutablePath_DefaultsToEmptyString() {
-        new BrowserConfig().setExecutablePath("");
-        assertEquals("", BrowserConfig.getExecutablePath());
+        BrowserConfig config = new BrowserConfig("", true, "");
+        assertEquals("", config.getExecutablePath());
     }
 
     @Test
-    void setExecutablePath_StoresPathStatically() {
+    void getExecutablePath_StoresPathFromConstructor() {
         String path = "/usr/bin/google-chrome-stable";
-        new BrowserConfig().setExecutablePath(path);
-        assertEquals(path, BrowserConfig.getExecutablePath());
+        BrowserConfig config = new BrowserConfig(path, true, "");
+        assertEquals(path, config.getExecutablePath());
     }
 
     @Test
-    void setExecutablePath_OverwritesPreviousValue() {
-        new BrowserConfig().setExecutablePath("/old/path/firefox");
-        new BrowserConfig().setExecutablePath("/new/path/chrome");
-        assertEquals("/new/path/chrome", BrowserConfig.getExecutablePath());
-    }
-
-    @Test
-    void setExecutablePath_WithWindowsPath_StoresCorrectly() {
+    void getExecutablePath_WithWindowsPath_StoresCorrectly() {
         String winPath = "C:/Program Files/Mozilla Firefox/firefox.exe";
-        new BrowserConfig().setExecutablePath(winPath);
-        assertEquals(winPath, BrowserConfig.getExecutablePath());
+        BrowserConfig config = new BrowserConfig(winPath, true, "");
+        assertEquals(winPath, config.getExecutablePath());
     }
 
     @Test
-    void setExecutablePath_WithBlankValue_StoresBlank() {
-        new BrowserConfig().setExecutablePath("  ");
-        assertEquals("  ", BrowserConfig.getExecutablePath());
+    void getExecutablePath_WithBlankValue_StoresBlank() {
+        BrowserConfig config = new BrowserConfig("  ", true, "");
+        assertEquals("  ", config.getExecutablePath());
     }
 
     @Test
     void isHeadless_DefaultsToTrue() {
-        assertTrue(BrowserConfig.isHeadless());
+        BrowserConfig config = new BrowserConfig("", true, "");
+        assertTrue(config.isHeadless());
     }
 
     @Test
-    void setHeadless_StoresValueStatically() {
-        new BrowserConfig().setHeadless(false);
-        assertFalse(BrowserConfig.isHeadless());
+    void isHeadless_StoresValueFromConstructor() {
+        BrowserConfig config = new BrowserConfig("", false, "");
+        assertFalse(config.isHeadless());
     }
 
     @Test
     void getExtraArgs_DefaultsToEmptyList() {
-        assertTrue(BrowserConfig.getExtraArgs().isEmpty());
+        BrowserConfig config = new BrowserConfig("", true, "");
+        assertTrue(config.getExtraArgs().isEmpty());
     }
 
     @Test
-    void setExtraArgs_WithBlankValue_KeepsListEmpty() {
-        new BrowserConfig().setExtraArgs("  ");
-        assertTrue(BrowserConfig.getExtraArgs().isEmpty());
+    void getExtraArgs_WithBlankValue_KeepsListEmpty() {
+        BrowserConfig config = new BrowserConfig("", true, "  ");
+        assertTrue(config.getExtraArgs().isEmpty());
     }
 
     @Test
-    void setExtraArgs_WithNull_KeepsListEmpty() {
-        new BrowserConfig().setExtraArgs(null);
-        assertTrue(BrowserConfig.getExtraArgs().isEmpty());
+    void getExtraArgs_WithNull_KeepsListEmpty() {
+        BrowserConfig config = new BrowserConfig("", true, null);
+        assertTrue(config.getExtraArgs().isEmpty());
     }
 
     @Test
-    void setExtraArgs_SplitsCommaSeparatedValues() {
-        new BrowserConfig().setExtraArgs("--no-sandbox,--disable-gpu");
-        assertEquals(List.of("--no-sandbox", "--disable-gpu"), BrowserConfig.getExtraArgs());
+    void getExtraArgs_SplitsCommaSeparatedValues() {
+        BrowserConfig config = new BrowserConfig("", true, "--no-sandbox,--disable-gpu");
+        assertEquals(List.of("--no-sandbox", "--disable-gpu"), config.getExtraArgs());
     }
 
     @Test
-    void setExtraArgs_WithSingleValue_StoresSingleElement() {
-        new BrowserConfig().setExtraArgs("--no-sandbox");
-        assertEquals(List.of("--no-sandbox"), BrowserConfig.getExtraArgs());
+    void getExtraArgs_WithSingleValue_StoresSingleElement() {
+        BrowserConfig config = new BrowserConfig("", true, "--no-sandbox");
+        assertEquals(List.of("--no-sandbox"), config.getExtraArgs());
     }
 }

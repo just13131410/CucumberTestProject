@@ -69,7 +69,7 @@ class ZephyrScaleClientTest {
         List<ZephyrTestExecution> executions = List.of(
                 ZephyrTestExecution.builder()
                         .testCaseKey("T-3511")
-                        .statusName("Pass")
+                        .status("Pass")
                         .build());
 
         zephyrClient.uploadTestResults("T-R42", executions);
@@ -78,16 +78,39 @@ class ZephyrScaleClientTest {
     }
 
     @Test
-    void getFolderByName_ReturnsEmptyIfNotFound() throws Exception {
-        mockServer.expect(requestTo(org.hamcrest.Matchers.containsString("/rest/atm/1.0/folder")))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+    void getTestRun_ReturnsTestRunWithItems() throws Exception {
+        ZephyrTestRun testRun = new ZephyrTestRun();
+        testRun.setKey("PROJ-R1");
+        ZephyrTestRunItem item1 = new ZephyrTestRunItem();
+        item1.setTestCaseKey("PROJ-T1");
+        ZephyrTestRunItem item2 = new ZephyrTestRunItem();
+        item2.setTestCaseKey("PROJ-T2");
+        testRun.setItems(List.of(item1, item2));
 
-        List<ZephyrFolder> folders = zephyrClient.getFolders("PROJ", "TEST_RUN");
+        mockServer.expect(requestTo(BASE_URL + "/rest/atm/1.0/testrun/PROJ-R1"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", AUTH_HEADER))
+                .andRespond(withSuccess(objectMapper.writeValueAsString(testRun), MediaType.APPLICATION_JSON));
+
+        ZephyrTestRun result = zephyrClient.getTestRun("PROJ-R1");
 
         mockServer.verify();
-        assertNotNull(folders);
-        assertTrue(folders.isEmpty());
+        assertNotNull(result);
+        assertEquals("PROJ-R1", result.getKey());
+        assertEquals(2, result.getItems().size());
+        assertEquals("PROJ-T1", result.getItems().get(0).getTestCaseKey());
+    }
+
+    @Test
+    void getTestRun_NotFound_ReturnsNull() {
+        mockServer.expect(requestTo(BASE_URL + "/rest/atm/1.0/testrun/PROJ-R404"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND));
+
+        ZephyrTestRun result = zephyrClient.getTestRun("PROJ-R404");
+
+        mockServer.verify();
+        assertNull(result);
     }
 
     @Test
@@ -117,5 +140,44 @@ class ZephyrScaleClientTest {
         mockServer.verify();
         assertNotNull(result);
         assertEquals("PROJ-42", result.getKey());
+    }
+
+    @Test
+    void constructor_BaseUrlWithTrailingSlash_StripsSlashToAvoidDoubleSlash() throws Exception {
+        // Reverse-Proxies/WAFs vor Jira DC blocken doppelte Slashes ("//rest/...") oft mit 403,
+        // obwohl die Basic-Auth-Credentials gueltig sind - baseUrl muss deshalb bereinigt werden.
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer serverWithTrailingSlash = MockRestServiceServer.createServer(restTemplate);
+        ZephyrScaleClient clientWithTrailingSlash =
+                new ZephyrScaleClient(restTemplate, BASE_URL + "/", "user", "token");
+
+        serverWithTrailingSlash.expect(requestTo(BASE_URL + "/rest/atm/1.0/testrun"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        clientWithTrailingSlash.createTestCycle(Map.of("name", "x", "projectKey", "PROJ"));
+
+        serverWithTrailingSlash.verify();
+    }
+
+    @Test
+    void createIssue_ServerError_ReturnsNull() {
+        mockServer.expect(requestTo(BASE_URL + "/rest/api/2/issue"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withServerError());
+
+        JiraIssueRequest request = JiraIssueRequest.builder()
+                .fields(JiraIssueRequest.Fields.builder()
+                        .project(Map.of("key", "PROJ"))
+                        .summary("Test Automation Failure")
+                        .issuetype(Map.of("name", "Bug"))
+                        .assignee(Map.of("name", "automation-user"))
+                        .build())
+                .build();
+
+        JiraIssueResponse result = jiraClient.createIssue(request);
+
+        mockServer.verify();
+        assertNull(result);
     }
 }

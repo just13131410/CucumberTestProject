@@ -80,6 +80,15 @@ public class ConfigReader {
     }
 
     /**
+     * Wandelt einen Property-Key in den erwarteten Umgebungsvariablen-Namen um (z.B.
+     * {@code "zephyr.api-token"} -> {@code "ZEPHYR_API_TOKEN"}), analog zu Spring Boots
+     * Relaxed-Binding-Konvention für {@code @Value}. Package-private für Unit-Tests.
+     */
+    static String toEnvKey(String key) {
+        return key.toUpperCase().replace(".", "_").replace("-", "_");
+    }
+
+    /**
      * Liest einen Konfigurationswert mit folgender Priorität:
      * <ol>
      *   <li>Umgebungsvariable (UPPER_SNAKE_CASE, z.B. von OpenShift ConfigMap/Secret)</li>
@@ -91,39 +100,60 @@ public class ConfigReader {
      * </ol>
      */
     public static String get(String key, String defaultValue) {
-        String envKey = key.toUpperCase().replace(".", "_");
+        return getWithSource(key, defaultValue).value();
+    }
+
+    /** Aufgelöster Konfigurationswert plus menschenlesbare Angabe, aus welcher Quelle er stammt. */
+    public record ResolvedValue(String value, String source) {}
+
+    /**
+     * Wie {@link #get(String, String)}, liefert zusätzlich die Quelle mit - gedacht für
+     * Diagnose-/Startup-Logs (z.B. "welche Zephyr-URL/Credentials werden tatsächlich verwendet").
+     */
+    public static ResolvedValue getWithSource(String key, String defaultValue) {
+        String envKey = toEnvKey(key);
 
         String envValue = System.getenv(envKey);
         if (envValue != null) {
             log.debug("Key '{}' bezogen aus: Umgebungsvariable ({})", key, envKey);
-            return envValue;
+            return new ResolvedValue(trim(envValue), "Umgebungsvariable (" + envKey + ")");
         }
 
         String sysProp = System.getProperty(key);
         if (sysProp != null) {
             log.debug("Key '{}' bezogen aus: System-Property (-D{})", key, key);
-            return sysProp;
+            return new ResolvedValue(trim(sysProp), "System-Property (-D" + key + ")");
         }
 
         String dotenvValue = dotenv.get(envKey, null);
         if (dotenvValue != null) {
             log.debug("Key '{}' bezogen aus: .env-Datei", key);
-            return dotenvValue;
+            return new ResolvedValue(trim(dotenvValue), ".env-Datei");
         }
 
         String secretValue = secretProperties.getProperty(key);
         if (secretValue != null) {
             log.debug("Key '{}' bezogen aus: Secret-Datei (CONFIGPATH)", key);
-            return secretValue;
+            return new ResolvedValue(trim(secretValue), "Secret-Datei (CONFIGPATH)");
         }
 
         String propValue = properties.getProperty(key);
         if (propValue != null) {
             log.debug("Key '{}' bezogen aus: config.properties (Classpath)", key);
-            return propValue;
+            return new ResolvedValue(trim(propValue), "config.properties (Classpath)");
         }
 
         log.debug("Key '{}' nicht gefunden – verwende Default: '{}'", key, defaultValue);
-        return defaultValue;
+        return new ResolvedValue(defaultValue, "Default");
+    }
+
+    /**
+     * Entfernt fuehrende/abschliessende Whitespaces (inkl. \r von Windows-Zeilenenden in .env-
+     * Dateien). Ohne das koennte z.B. ein unsichtbares \r am Ende eines Tokens aus der .env
+     * mit ins Basic-Auth-Encoding wandern und die Anmeldung mit einem kaum diagnostizierbaren
+     * Fehler scheitern lassen.
+     */
+    private static String trim(String value) {
+        return value == null ? null : value.strip();
     }
 }

@@ -2,23 +2,17 @@ package org.example.steps;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
-import io.cucumber.java.en.When;
 import io.qameta.allure.Allure;
-import io.qameta.allure.restassured.AllureRestAssured;
-import io.restassured.response.Response;
-import io.restassured.specification.RequestSpecification;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
 import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.example.utils.ConfigReader;
-import org.junit.jupiter.api.Assumptions;
 import org.w3c.dom.Document;
-import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -27,110 +21,21 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
-import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 
-public class ApiSteps {
-
-    private static final String INVALID_TOKEN = "invalid_token_for_auth_test";
+/**
+ * Steps zur PDF-Erzeugung sowie zur Prüfung von PDF-Inhalt und eingebettetem XML gegen
+ * JSON-Testdaten. Fachlich unabhängig von den REST-API-Steps ({@link GitHubApiSteps},
+ * {@link TodoApiSteps}), da hier kein HTTP-{@code Response}-Objekt im Spiel ist.
+ */
+public class PdfSteps {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private String baseUrl;
-    private String authToken;
-    private Response response;
     private Map<String, Object> testData;
-
-    // --- Todo API Felder ---
-    private String todoApiUrl;
-    private String jwtToken;
-    private Integer lastCreatedTodoId;
-
-    @Given("API Basis-URL ist gesetzt")
-    public void setBaseUrl() {
-        this.baseUrl = ConfigReader.get("apiURL", "https://api.github.com");
-        Allure.step("Base URL gesetzt auf: " + this.baseUrl);
-    }
-
-    @Given("ein gültiger API-Token ist konfiguriert")
-    public void requireAuthToken() {
-        this.authToken = ConfigReader.get("api.token", null);
-        Assumptions.assumeTrue(
-                authToken != null && !authToken.isBlank(),
-                "Kein API-Token konfiguriert (api.token) – Szenario wird übersprungen."
-        );
-        Allure.step("API-Token geladen (Länge: " + authToken.length() + " Zeichen)");
-    }
-
-    @When("ich GET an {string} ausführe ohne Authentifizierung")
-    public void performGetWithoutAuth(String path) {
-        response = baseRequest()
-                .when()
-                .get(path)
-                .then()
-                .extract()
-                .response();
-    }
-
-    @When("ich GET an {string} ausführe mit Bearer-Token")
-    public void performGetWithBearerToken(String path) {
-        response = baseRequest()
-                .header("Authorization", "Bearer " + authToken)
-                .when()
-                .get(path)
-                .then()
-                .extract()
-                .response();
-    }
-
-    @When("ich GET an {string} ausführe mit ungültigem Token")
-    public void performGetWithInvalidToken(String path) {
-        response = baseRequest()
-                .header("Authorization", "Bearer " + INVALID_TOKEN)
-                .when()
-                .get(path)
-                .then()
-                .extract()
-                .response();
-    }
-
-    @Then("ist der Statuscode {int}")
-    public void verifyStatusCode(int expected) {
-        assertThat("Statuscode stimmt nicht", response.getStatusCode(), equalTo(expected));
-    }
-
-    @Then("enthält das JSON-Feld {string} mit String-Wert {string}")
-    public void verifyJsonFieldEqualsString(String field, String expected) {
-        assertThat("JSON-Feld stimmt nicht", response.jsonPath().getString(field), equalTo(expected));
-    }
-
-    @Then("enthält das JSON-Feld {string} mit Wert {int}")
-    public void verifyJsonFieldEquals(String field, int expected) {
-        assertThat("JSON-Feld stimmt nicht", response.jsonPath().getInt(field), equalTo(expected));
-    }
-
-    @Then("das JSON-Feld {string} ist nicht leer")
-    public void verifyJsonFieldNotEmpty(String field) {
-        String value = response.jsonPath().getString(field);
-        assertThat("JSON-Feld '" + field + "' ist null oder leer", value, not(emptyOrNullString()));
-    }
-
-    @Then("das JSON-Feld {string} ist vorhanden")
-    public void verifyJsonFieldExists(String field) {
-        Object value = response.jsonPath().get(field);
-        assertThat("JSON-Feld '" + field + "' fehlt in der Response", value, notNullValue());
-    }
-
-    @Then("die Response ist eine JSON-Liste")
-    public void verifyResponseIsList() {
-        List<?> list = response.jsonPath().getList("$");
-        assertThat("Response ist keine JSON-Liste", list, notNullValue());
-    }
-
-    // --- PDF-Szenarien (unverändert) ---
 
     @Given("die Testdatei {string} ist geladen")
     public void loadTestData(String fileName) throws Exception {
@@ -268,138 +173,6 @@ public class ApiSteps {
         } catch (Exception e) {
             throw new RuntimeException("PDF konnte nicht erstellt werden", e);
         }
-    }
-
-    // --- Todo API Schritte ---
-
-    @Given("die Todo-API Basis-URL ist gesetzt")
-    public void setTodoApiBaseUrl() {
-        this.todoApiUrl = ConfigReader.get("todoApiUrl", "http://localhost:3000");
-        Allure.step("Todo-API Basis-URL gesetzt auf: " + this.todoApiUrl);
-    }
-
-    @When("ich mich an der Todo-API mit Benutzername {string} und Passwort {string} anmelde")
-    public void loginWithCredentials(String username, String password) {
-        response = todoRequest()
-                .contentType("application/json")
-                .body(Map.of("username", username, "password", password))
-                .when()
-                .post("/api/auth/login")
-                .then()
-                .extract()
-                .response();
-        if (response.getStatusCode() == 200) {
-            jwtToken = response.jsonPath().getString("token");
-        }
-    }
-
-    @Given("ich bin als {string} mit Passwort {string} in der Todo-API eingeloggt")
-    public void loginAndStoreToken(String username, String password) {
-        loginWithCredentials(username, password);
-        Assumptions.assumeTrue(jwtToken != null,
-                "Login fehlgeschlagen – Szenario wird übersprungen.");
-        Allure.step("JWT-Token erhalten (Länge: " + jwtToken.length() + " Zeichen)");
-    }
-
-    @Given("ich ein neues Todo mit Titel {string} angelegt habe")
-    public void createTodoAsGiven(String title) {
-        createTodoInternal(title);
-        Assumptions.assumeTrue(lastCreatedTodoId != null,
-                "Todo-Erstellung fehlgeschlagen – Szenario wird übersprungen.");
-    }
-
-    @When("ich GET an {string} ausführe mit JWT-Token")
-    public void performGetWithJwt(String path) {
-        response = todoRequest()
-                .header("Authorization", "Bearer " + jwtToken)
-                .when()
-                .get(path)
-                .then()
-                .extract()
-                .response();
-    }
-
-    @When("ich die Todo-Liste ohne Token abrufe")
-    public void getTodosWithoutToken() {
-        response = todoRequest()
-                .when()
-                .get("/api/todos")
-                .then()
-                .extract()
-                .response();
-    }
-
-    @When("ich ein neues Todo mit Titel {string} anlege")
-    public void createTodoStep(String title) {
-        createTodoInternal(title);
-    }
-
-    @When("ich ein neues Todo ohne Titel anlege")
-    public void createTodoWithoutTitle() {
-        response = todoRequest()
-                .header("Authorization", "Bearer " + jwtToken)
-                .contentType("application/json")
-                .body(Map.of("title", ""))
-                .when()
-                .post("/api/todos")
-                .then()
-                .extract()
-                .response();
-    }
-
-    @When("ich das Todo mit dem Titel {string} aktualisiere")
-    public void updateTodoStep(String newTitle) {
-        response = todoRequest()
-                .header("Authorization", "Bearer " + jwtToken)
-                .contentType("application/json")
-                .body(Map.of("title", newTitle))
-                .when()
-                .put("/api/todos/" + lastCreatedTodoId)
-                .then()
-                .extract()
-                .response();
-    }
-
-    @When("ich das zuletzt angelegte Todo lösche")
-    public void deleteLastTodo() {
-        response = todoRequest()
-                .header("Authorization", "Bearer " + jwtToken)
-                .when()
-                .delete("/api/todos/" + lastCreatedTodoId)
-                .then()
-                .extract()
-                .response();
-    }
-
-    private void createTodoInternal(String title) {
-        response = todoRequest()
-                .header("Authorization", "Bearer " + jwtToken)
-                .contentType("application/json")
-                .body(Map.of("title", title))
-                .when()
-                .post("/api/todos")
-                .then()
-                .extract()
-                .response();
-        if (response.getStatusCode() == 201) {
-            lastCreatedTodoId = response.jsonPath().getInt("id");
-        }
-    }
-
-    // --- Hilfsmethoden ---
-
-    private RequestSpecification todoRequest() {
-        return given()
-                .filter(new AllureRestAssured())
-                .baseUri(todoApiUrl);
-    }
-
-    private RequestSpecification baseRequest() {
-        return given()
-                .filter(new AllureRestAssured())
-                .baseUri(baseUrl)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28");
     }
 
     private byte[] loadTestDataFile(String fileName) throws Exception {

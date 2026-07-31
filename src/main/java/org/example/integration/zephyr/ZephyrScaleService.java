@@ -1,24 +1,16 @@
 package org.example.integration.zephyr;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.jira.JiraClient;
 import org.example.integration.model.*;
+import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -30,17 +22,25 @@ import java.util.stream.Collectors;
 public class ZephyrScaleService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final String FOLDER_TYPE = "TEST_RUN";
 
     private final ZephyrScaleClient zephyrClient;
     private final JiraClient jiraClient;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final CucumberResultReader cucumberResultReader;
+    private final MockIntegrationService mockIntegrationService;
 
     @Value("${zephyr.enabled:false}")
     private boolean zephyrEnabled;
 
     @Value("${zephyr.default-project-key:}")
     private String defaultProjectKey;
+
+    /** Key des Testruns, dessen Testfaelle in jeden neu angelegten Testrun geklont werden. */
+    @Value("${zephyr.template-test-run-key:}")
+    private String templateTestRunKey;
+
+    /** Zephyr-Folder-Pfad (String, z.B. "/Testautomation/Smoketest"), dem der neue Testrun zugeordnet wird. */
+    @Value("${zephyr.result-folder:}")
+    private String resultFolder;
 
     @Value("${jira.enabled:false}")
     private boolean jiraEnabled;
@@ -54,20 +54,36 @@ public class ZephyrScaleService {
     @Value("${integration.mock.enabled:false}")
     private boolean mockEnabled;
 
-    @Value("${zephyr.base-url:https://jira.yourcompany.com}")
-    private String zephyrBaseUrl;
-
-    @Value("${zephyr.api-token:}")
-    private String zephyrApiToken;
+    // Bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen: Spring's @Value
+    // liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
+    private final String zephyrApiToken = ConfigReader.get("zephyr.api-token", "");
 
     @PostConstruct
     private void validateConfig() {
+        logResolvedConfig();
         if (zephyrEnabled && !mockEnabled && zephyrApiToken.isBlank()) {
             log.error("zephyr.enabled=true, aber zephyr.api-token ist leer - Zephyr-Uploads werden mit 401 fehlschlagen");
         }
         if (jiraEnabled && !mockEnabled && jiraAssigneeAccountId.isBlank()) {
             log.error("jira.enabled=true, aber jira.default-assignee-account-id ist leer - Jira-Ticket-Erstellung wird fehlschlagen");
         }
+    }
+
+    /**
+     * Loggt beim Start, welche Zephyr-URL und welche Credentials tatsaechlich verwendet werden
+     * und aus welcher Quelle (Umgebungsvariable/.env/Secret-Datei/config.properties/Default) sie
+     * stammen - der Token-Wert selbst wird nie geloggt, nur seine Laenge als Vorhanden-Nachweis.
+     */
+    private void logResolvedConfig() {
+        var baseUrl = ConfigReader.getWithSource("zephyr.base-url", "https://jira.yourcompany.com");
+        var username = ConfigReader.getWithSource("zephyr.username", "");
+        var token = ConfigReader.getWithSource("zephyr.api-token", "");
+
+        log.info("Zephyr Scale URL: {} (Quelle: {})", baseUrl.value(), baseUrl.source());
+        log.info("Zephyr Scale Credentials: username='{}' (Quelle: {}), api-token={} (Quelle: {})",
+                username.value().isBlank() ? "<nicht gesetzt>" : username.value(), username.source(),
+                token.value().isBlank() ? "<nicht gesetzt>" : "***gesetzt, " + token.value().length() + " Zeichen***",
+                token.source());
     }
 
     public void uploadRunResults(UUID runId, TestExecutionRequest request, int exitCode, TestStatus status) {
@@ -84,7 +100,7 @@ public class ZephyrScaleService {
 
         try {
             if (mockEnabled) {
-                simulateResults(runId, request, exitCode, status, projectKey);
+                mockIntegrationService.simulateResults(runId, status, exitCode, projectKey);
                 return;
             }
 
@@ -102,20 +118,18 @@ public class ZephyrScaleService {
 
     private void uploadToZephyr(UUID runId, TestExecutionRequest request, int exitCode,
                                 TestStatus status, String projectKey) {
-        Long folderId = getOrCreateFolder(projectKey, request);
-
-        String cycleKey = createCycle(runId, request, projectKey, folderId);
+        String cycleKey = createCycle(runId, request, projectKey);
         if (cycleKey == null) {
-            log.warn("Failed to create Zephyr test cycle for runId={}", runId);
+            log.warn("Failed to create Zephyr test run for runId={}", runId);
             return;
         }
 
-        addMetadata(status, "zephyrCycleKey", cycleKey);
+        StatusMetadataSupport.addMetadata(status, "zephyrCycleKey", cycleKey);
 
-        List<ZephyrTestExecution> executions = buildExecutions(runId, exitCode);
+        List<ZephyrTestExecution> executions = cucumberResultReader.buildExecutions(runId, exitCode);
         if (!executions.isEmpty()) {
             zephyrClient.uploadTestResults(cycleKey, executions);
-            addMetadata(status, "zephyrExecutions", executions.stream()
+            StatusMetadataSupport.addMetadata(status, "zephyrExecutions", executions.stream()
                     .map(ZephyrTestExecution::getTestCaseKey)
                     .collect(Collectors.toList()));
         }
@@ -128,37 +142,7 @@ public class ZephyrScaleService {
         return defaultProjectKey;
     }
 
-    private Long getOrCreateFolder(String projectKey, TestExecutionRequest request) {
-        String folderName = resolveFolderName(request);
-        List<ZephyrFolder> folders = zephyrClient.getFolders(projectKey, FOLDER_TYPE);
-        Optional<ZephyrFolder> existing = folders.stream()
-                .filter(f -> folderName.equals(f.getName()))
-                .findFirst();
-        if (existing.isPresent()) {
-            return existing.get().getId();
-        }
-        ZephyrFolder created = zephyrClient.createFolder(folderName, projectKey, FOLDER_TYPE);
-        return created != null ? created.getId() : null;
-    }
-
-    String resolveFolderName(TestExecutionRequest request) {
-        if (request.getTags() == null) return "Default";
-        for (String tag : request.getTags()) {
-            String normalized = tag.startsWith("@") ? tag.substring(1) : tag;
-            if ("SmokeTest".equalsIgnoreCase(normalized) || "smoke".equalsIgnoreCase(normalized)) {
-                return "SmokeTest";
-            }
-            if ("Frontend".equalsIgnoreCase(normalized)) {
-                return "Frontend";
-            }
-            if ("Backend".equalsIgnoreCase(normalized)) {
-                return "Backend";
-            }
-        }
-        return "Default";
-    }
-
-    private String createCycle(UUID runId, TestExecutionRequest request, String projectKey, Long folderId) {
+    private String createCycle(UUID runId, TestExecutionRequest request, String projectKey) {
         String shortRunId = runId.toString().substring(0, 8);
         String tags = request.getTags() != null ? String.join(" ", request.getTags()) : "";
         String date = LocalDate.now().format(DATE_FMT);
@@ -167,61 +151,38 @@ public class ZephyrScaleService {
         Map<String, Object> body = new HashMap<>();
         body.put("name", cycleName);
         body.put("projectKey", projectKey);
-        if (folderId != null) {
-            body.put("folderId", folderId);
+        if (resultFolder != null && !resultFolder.isBlank()) {
+            body.put("folder", resultFolder);
+        }
+        List<Map<String, String>> clonedItems = cloneTestCaseItems();
+        if (!clonedItems.isEmpty()) {
+            body.put("items", clonedItems);
         }
 
         ZephyrTestCycle cycle = zephyrClient.createTestCycle(body);
         return cycle != null ? cycle.getKey() : null;
     }
 
-    private List<ZephyrTestExecution> buildExecutions(UUID runId, int exitCode) {
-        Path cucumberJson = getResultsBasePath(runId).resolve("cucumber-reports").resolve("Cucumber.json");
-        if (Files.exists(cucumberJson)) {
-            List<ZephyrTestExecution> detailed = parseDetailedExecutions(cucumberJson);
-            if (!detailed.isEmpty()) {
-                return detailed;
-            }
-        }
-        return List.of(ZephyrTestExecution.builder()
-                .testCaseKey(runId.toString().substring(0, 8))
-                .statusName(exitCode == 0 ? "Pass" : "Fail")
-                .comment("Run: " + runId)
-                .build());
-    }
-
-    private List<ZephyrTestExecution> parseDetailedExecutions(Path cucumberJson) {
-        try {
-            List<CucumberFeature> features = objectMapper.readValue(
-                    cucumberJson.toFile(), new TypeReference<>() {});
-            List<ZephyrTestExecution> executions = new ArrayList<>();
-            for (CucumberFeature feature : features) {
-                if (feature.getElements() == null) continue;
-                for (CucumberElement element : feature.getElements()) {
-                    String testCaseKey = extractTestCaseKey(element.getTags());
-                    if (testCaseKey == null) continue;
-                    boolean allPassed = element.getSteps() != null && element.getSteps().stream()
-                            .allMatch(s -> s.getResult() != null && "passed".equals(s.getResult().getStatus()));
-                    executions.add(ZephyrTestExecution.builder()
-                            .testCaseKey(testCaseKey)
-                            .statusName(allPassed ? "Pass" : "Fail")
-                            .build());
-                }
-            }
-            return executions;
-        } catch (IOException e) {
-            log.warn("Failed to parse Cucumber JSON at {}: {}", cucumberJson, e.getMessage());
+    /**
+     * Liest die Testfaelle des konfigurierten Template-Testruns ({@code zephyr.template-test-run-key})
+     * und baut daraus die "items"-Liste fuer POST /testrun, damit der neu angelegte Testrun
+     * dieselben Testfaelle enthaelt ("klonen"). Ohne konfigurierten Template-Key oder falls der
+     * Template-Testrun nicht lesbar ist, wird der neue Testrun ohne vorbelegte Testfaelle angelegt.
+     */
+    private List<Map<String, String>> cloneTestCaseItems() {
+        if (templateTestRunKey == null || templateTestRunKey.isBlank()) {
             return List.of();
         }
-    }
-
-    private String extractTestCaseKey(List<CucumberTag> tags) {
-        if (tags == null) return null;
-        return tags.stream()
-                .filter(t -> t.getName() != null && t.getName().startsWith("@T-"))
-                .map(t -> t.getName().substring(1))
-                .findFirst()
-                .orElse(null);
+        ZephyrTestRun template = zephyrClient.getTestRun(templateTestRunKey);
+        if (template == null || template.getItems() == null) {
+            log.warn("Template-Testrun '{}' nicht gefunden oder enthaelt keine Testfaelle", templateTestRunKey);
+            return List.of();
+        }
+        return template.getItems().stream()
+                .map(ZephyrTestRunItem::getTestCaseKey)
+                .filter(Objects::nonNull)
+                .map(key -> Map.of("testCaseKey", key))
+                .collect(Collectors.toList());
     }
 
     private void createJiraTicket(UUID runId, TestExecutionRequest request,
@@ -249,108 +210,7 @@ public class ZephyrScaleService {
             if (status != null) {
                 status.setJiraTicketKey(issue.getKey());
             }
-            addMetadata(status, "jiraTicket", issue.getKey());
+            StatusMetadataSupport.addMetadata(status, "jiraTicket", issue.getKey());
         }
-    }
-
-    private void simulateResults(UUID runId, TestExecutionRequest request,
-                                 int exitCode, TestStatus status, String projectKey) {
-        String shortId   = runId.toString().substring(0, 8).toUpperCase();
-        String cycleKey  = "T-R-" + shortId;
-        String base      = zephyrBaseUrl.replaceAll("/$", "");
-        String zephyrUrl = base + "/secure/Tests.jspa#/testRun/" + cycleKey;
-
-        log.info("[MOCK] Zephyr Test-Run simuliert: key={}, url={}", cycleKey, zephyrUrl);
-        addMetadata(status, "zephyrCycleKey", cycleKey);
-        addReportUrl(status, "zephyr-run", zephyrUrl);
-
-        if (exitCode != 0) {
-            int ticketNumber = Math.abs(runId.hashCode()) % 9000 + 1000;
-            String ticketKey = projectKey + "-" + ticketNumber;
-            String ticketUrl = base + "/browse/" + ticketKey;
-
-            log.info("[MOCK] Jira Ticket simuliert: key={}, url={}", ticketKey, ticketUrl);
-            if (status != null) {
-                status.setJiraTicketKey(ticketKey);
-            }
-            addMetadata(status, "jiraTicket", ticketKey);
-            addReportUrl(status, "jira-ticket", ticketUrl);
-        }
-    }
-
-    private void addReportUrl(TestStatus status, String key, String url) {
-        if (status == null) return;
-        Map<String, String> reportUrls = status.getReportUrls();
-        if (reportUrls == null) {
-            reportUrls = new LinkedHashMap<>();
-            status.setReportUrls(reportUrls);
-        }
-        reportUrls.put(key, url);
-    }
-
-    private void addMetadata(TestStatus status, String key, Object value) {
-        if (status == null) return;
-        Map<String, Object> metadata = status.getMetadata();
-        if (metadata == null) {
-            metadata = new HashMap<>();
-            status.setMetadata(metadata);
-        }
-        metadata.put(key, value);
-    }
-
-    private Path getResultsBasePath(UUID runId) {
-        String envPath = System.getenv("TEST_RESULTS_PATH");
-        if (envPath != null && !envPath.isBlank()) {
-            return Path.of(envPath, runId.toString());
-        }
-        String sysProp = System.getProperty("test.results.path");
-        if (sysProp != null && !sysProp.isBlank()) {
-            return Path.of(sysProp, runId.toString());
-        }
-        return Path.of("test-results", runId.toString());
-    }
-
-    // Inner classes for Cucumber JSON parsing
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberFeature {
-        @JsonProperty("elements")
-        private List<CucumberElement> elements;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberElement {
-        @JsonProperty("tags")
-        private List<CucumberTag> tags;
-        @JsonProperty("steps")
-        private List<CucumberStep> steps;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberTag {
-        @JsonProperty("name")
-        private String name;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberStep {
-        @JsonProperty("result")
-        private CucumberResult result;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    static class CucumberResult {
-        @JsonProperty("status")
-        private String status;
     }
 }

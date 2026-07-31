@@ -40,6 +40,64 @@ public class AxeReportHook {
             new ConcurrentHashMap<>();
 
     /**
+     * Gemeinsames Basis-CSS für {@link #generateIndexHtml} und {@link #generateSimpleHtml}
+     * (Reset, Layout-Grundgerüst, Summary-Cards, Section-Title, Footer, Skip-Link). Seitenspezifische
+     * Regeln (Tabelle/Badges vs. Violation-Cards) bleiben in der jeweiligen Methode.
+     */
+    private static final String BASE_REPORT_CSS = """
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px;
+                    }
+
+                    .container {
+                        max-width: 1200px; margin: 0 auto; background: white;
+                        border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;
+                    }
+
+                    header {
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white; padding: 30px; text-align: center;
+                    }
+
+                    h1 { font-size: 2rem; margin-bottom: 10px; }
+                    .subtitle { font-size: 1rem; opacity: 0.9; }
+
+                    .summary-card {
+                        background: white; padding: 20px; border-radius: 8px;
+                        text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 4px solid;
+                    }
+                    .summary-card.success { border-color: #28a745; }
+                    .summary-card.danger  { border-color: #dc3545; }
+                    .summary-card.warning { border-color: #ffc107; }
+                    .summary-card .number { font-size: 2.5rem; font-weight: bold; margin: 10px 0; }
+                    .summary-card.success .number { color: #28a745; }
+                    .summary-card.danger  .number { color: #dc3545; }
+                    .summary-card .label {
+                        font-size: 0.9rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px;
+                    }
+
+                    .section-title {
+                        font-size: 1.5rem; margin-bottom: 20px; color: #333;
+                        border-bottom: 3px solid #667eea; padding-bottom: 10px;
+                    }
+
+                    footer {
+                        background: #f8f9fa; padding: 20px; text-align: center;
+                        border-top: 1px solid #e0e0e0; color: #666; font-size: 0.9rem;
+                    }
+
+                    .skip-link {
+                        position: absolute; top: -40px; left: 0; background: #667eea;
+                        color: white; padding: 8px 15px; text-decoration: none;
+                        border-radius: 0 0 5px 0; z-index: 100;
+                    }
+                    .skip-link:focus { top: 0; }
+            """;
+
+    /**
      * Resolves the axe report output directory.
      * Uses per-run isolation if TestContext is active, falls back to config/default.
      */
@@ -121,53 +179,15 @@ public class AxeReportHook {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Barrierefreiheit – Testrun-Übersicht</title>
                 <style>
-                    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-                    body {
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                        line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px;
-                    }
-
-                    .container {
-                        max-width: 1200px; margin: 0 auto; background: white;
-                        border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;
-                    }
-
-                    header {
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        color: white; padding: 30px; text-align: center;
-                    }
-
-                    h1 { font-size: 2rem; margin-bottom: 10px; }
-                    .subtitle { font-size: 1rem; opacity: 0.9; }
-
+            """).append(BASE_REPORT_CSS).append("""
                     .summary {
                         display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
                         gap: 20px; padding: 30px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0;
                     }
-
-                    .summary-card {
-                        background: white; padding: 20px; border-radius: 8px;
-                        text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 4px solid;
-                    }
-                    .summary-card.success { border-color: #28a745; }
-                    .summary-card.danger  { border-color: #dc3545; }
-                    .summary-card.warning { border-color: #ffc107; }
-                    .summary-card.info    { border-color: #667eea; }
-                    .summary-card .number { font-size: 2.5rem; font-weight: bold; margin: 10px 0; }
-                    .summary-card.success .number { color: #28a745; }
-                    .summary-card.danger  .number { color: #dc3545; }
-                    .summary-card.info    .number { color: #667eea; }
-                    .summary-card .label {
-                        font-size: 0.9rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px;
-                    }
+                    .summary-card.info { border-color: #667eea; }
+                    .summary-card.info .number { color: #667eea; }
 
                     .scans-section { padding: 30px; }
-
-                    .section-title {
-                        font-size: 1.5rem; margin-bottom: 20px; color: #333;
-                        border-bottom: 3px solid #667eea; padding-bottom: 10px;
-                    }
 
                     table {
                         width: 100%; border-collapse: collapse; margin-top: 10px;
@@ -198,18 +218,6 @@ public class AxeReportHook {
                     .no-scans {
                         text-align: center; padding: 60px 20px; color: #666;
                     }
-
-                    footer {
-                        background: #f8f9fa; padding: 20px; text-align: center;
-                        border-top: 1px solid #e0e0e0; color: #666; font-size: 0.9rem;
-                    }
-
-                    .skip-link {
-                        position: absolute; top: -40px; left: 0; background: #667eea;
-                        color: white; padding: 8px 15px; text-decoration: none;
-                        border-radius: 0 0 5px 0; z-index: 100;
-                    }
-                    .skip-link:focus { top: 0; }
 
                     @media (max-width: 768px) {
                         .summary { grid-template-columns: 1fr 1fr; }
@@ -446,46 +454,7 @@ public class AxeReportHook {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Barrierefreiheits-Prüfbericht</title>
                 <style>
-                    * {
-                        margin: 0;
-                        padding: 0;
-                        box-sizing: border-box;
-                    }
-
-                    body {
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                        line-height: 1.6;
-                        color: #333;
-                        background: #f5f5f5;
-                        padding: 20px;
-                    }
-
-                    .container {
-                        max-width: 1200px;
-                        margin: 0 auto;
-                        background: white;
-                        border-radius: 8px;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                        overflow: hidden;
-                    }
-
-                    header {
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        color: white;
-                        padding: 30px;
-                        text-align: center;
-                    }
-
-                    h1 {
-                        font-size: 2rem;
-                        margin-bottom: 10px;
-                    }
-
-                    .subtitle {
-                        font-size: 1rem;
-                        opacity: 0.9;
-                    }
-
+            """).append(BASE_REPORT_CSS).append("""
                     .back-link {
                         display: inline-block;
                         margin-top: 12px;
@@ -505,31 +474,7 @@ public class AxeReportHook {
                         border-bottom: 1px solid #e0e0e0;
                     }
 
-                    .summary-card {
-                        background: white;
-                        padding: 20px;
-                        border-radius: 8px;
-                        text-align: center;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                        border-left: 4px solid;
-                    }
-
-                    .summary-card.success { border-color: #28a745; }
-                    .summary-card.danger  { border-color: #dc3545; }
-                    .summary-card.warning { border-color: #ffc107; }
-                    .summary-card .number { font-size: 2.5rem; font-weight: bold; margin: 10px 0; }
-                    .summary-card.success .number { color: #28a745; }
-                    .summary-card.danger  .number { color: #dc3545; }
-                    .summary-card .label {
-                        font-size: 0.9rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px;
-                    }
-
                     .violations-section { padding: 30px; }
-
-                    .section-title {
-                        font-size: 1.5rem; margin-bottom: 20px; color: #333;
-                        border-bottom: 3px solid #667eea; padding-bottom: 10px;
-                    }
 
                     .violation-card {
                         background: white; border: 1px solid #e0e0e0; border-left: 4px solid;
@@ -588,18 +533,6 @@ public class AxeReportHook {
                     .no-violations { text-align: center; padding: 60px 20px; color: #28a745; }
                     .no-violations svg { width: 80px; height: 80px; margin-bottom: 20px; }
                     .no-violations h2 { font-size: 1.8rem; margin-bottom: 10px; }
-
-                    footer {
-                        background: #f8f9fa; padding: 20px; text-align: center;
-                        border-top: 1px solid #e0e0e0; color: #666; font-size: 0.9rem;
-                    }
-
-                    .skip-link {
-                        position: absolute; top: -40px; left: 0; background: #667eea;
-                        color: white; padding: 8px 15px; text-decoration: none;
-                        border-radius: 0 0 5px 0; z-index: 100;
-                    }
-                    .skip-link:focus { top: 0; }
 
                     @media (max-width: 768px) {
                         .summary { grid-template-columns: 1fr; }

@@ -1,0 +1,237 @@
+{
+  "info": {
+    "_postman_id": "e3a1f7c4-2b8d-4e6a-9c1f-500000000001",
+    "name": "Zephyr Scale Integration (Cucumber Test Service)",
+    "description": "Bildet exakt den Ablauf nach, den `ZephyrScaleService`/`ZephyrScaleClient` im Cucumber Test Service nach jedem Testlauf gegen Zephyr Scale Server (ATM v1) und Jira ausführen. Verifiziert gegen die echte RAML-Spezifikation unter https://support.smartbear.com/zephyr-scale-server/api-docs/v1/kanoah/api.raml.\n\n**Auth:** Basic Auth auf Collection-Ebene, `{{zephyrUsername}}` / `{{zephyrApiToken}}` aus der Environment (nicht in der Collection selbst – Secrets bleiben in der Environment-Datei).\n\n**Wichtig zum `folder`-Feld:** ist ein **String-Pfad** (z. B. `/Testautomation/Smoketest`), **keine** numerische ID. Es gibt in Zephyr Scale Server API v1 kein `GET /folder` und kein `POST /folder`-Äquivalent, das der Service nutzt – der Pfad muss in Zephyr bereits existieren.\n\n**Ablauf (Ordner 1, der Reihe nach ausführen):**\n1. **Get Template Testrun** – liest die Testfälle eines bestehenden Testruns (`{{templateTestRunKey}}`) und speichert sie automatisch in `{{clonedItems}}`.\n2. **Create Testrun** – legt einen neuen Testrun an, mit `folder` (String-Pfad) und den geklonten `items`. Der neue Key wird automatisch in `{{testRunKey}}` gespeichert.\n3. **Upload Test Results** – lädt Beispiel-Ergebnisse in den neuen Testrun hoch.\n4. **Get Created Testrun** – liest den neuen Testrun zur Kontrolle zurück.\n\nOrdner 2 (**Jira**) simuliert die Ticket-Erstellung, die der Service nur bei `exitCode != 0` auslöst.\n\nOrdner 0 (**Diagnose**) prüft nur, ob die Basic-Auth-Credentials überhaupt akzeptiert werden (`GET /rest/api/2/myself`, Standard-Jira-Endpunkt) – nützlich, um Auth-Probleme von Contract-Problemen zu unterscheiden.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "basic",
+    "basic": [
+      { "key": "username", "value": "{{zephyrUsername}}", "type": "string" },
+      { "key": "password", "value": "{{zephyrApiToken}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "0. Diagnose",
+      "description": "Prüft nur die Basic-Auth-Credentials gegen einen Standard-Jira-Endpunkt, bevor man Zephyr-spezifische Endpunkte testet.",
+      "item": [
+        {
+          "name": "Whoami (Auth-Check)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 = Basic-Auth-Credentials akzeptiert', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "if (pm.response.code !== 200) {",
+                  "    console.log('Auth fehlgeschlagen. Body: ' + pm.response.text());",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rest/api/2/myself",
+              "host": ["{{baseUrl}}"],
+              "path": ["rest", "api", "2", "myself"]
+            },
+            "description": "Standard-Jira-Endpunkt (kein Zephyr), liefert bei gültiger Basic-Auth den aktuell angemeldeten Benutzer zurück. 200 = Credentials sind korrekt; damit lässt sich ein 403/500 bei den Zephyr-Endpunkten als Contract-/Berechtigungs- statt Auth-Problem eingrenzen."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Testrun-Ablauf (wie im Service)",
+      "description": "Der Reihe nach ausführen (oder per Collection Runner). Entspricht 1:1 ZephyrScaleService.uploadToZephyr().",
+      "item": [
+        {
+          "name": "1.1 Get Template Testrun",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = {};",
+                  "try { json = pm.response.json(); } catch (e) {}",
+                  "var items = (json.items || []).map(function (i) {",
+                  "    return { testCaseKey: i.testCaseKey };",
+                  "});",
+                  "pm.collectionVariables.set('clonedItems', JSON.stringify(items));",
+                  "console.log('Geklonte Testfaelle (' + items.length + '): ' + items.map(function (i) { return i.testCaseKey; }).join(', '));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rest/atm/1.0/testrun/{{templateTestRunKey}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["rest", "atm", "1.0", "testrun", "{{templateTestRunKey}}"]
+            },
+            "description": "Entspricht `ZephyrScaleClient.getTestRun()`. Liest den Template-Testrun (`zephyr.template-test-run-key` in der App-Config) und extrahiert `items[].testCaseKey` in die Collection-Variable `{{clonedItems}}`, die von 1.2 verwendet wird.\n\n**Antworten:** `200` OK · `404` Testrun nicht gefunden."
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Create Testrun (Folder + geklonte Testfälle)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "var json = {};",
+                  "try { json = pm.response.json(); } catch (e) {}",
+                  "if (json && json.key) {",
+                  "    pm.collectionVariables.set('testRunKey', json.key);",
+                  "    console.log('Neuer Testrun angelegt: ' + json.key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectKey\": \"{{projectKey}}\",\n  \"name\": \"{{$isoTimestamp}} Postman-Testlauf\",\n  \"folder\": \"{{resultFolder}}\",\n  \"items\": {{clonedItems}}\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/atm/1.0/testrun",
+              "host": ["{{baseUrl}}"],
+              "path": ["rest", "atm", "1.0", "testrun"]
+            },
+            "description": "Entspricht `ZephyrScaleService.createCycle()` / `ZephyrScaleClient.createTestCycle()`.\n\n`folder` ist ein **String-Pfad** (z. B. `/Testautomation/Smoketest`), muss in Zephyr bereits existieren – es wird kein Folder angelegt. `items` kommt aus `{{clonedItems}}` (von 1.1 befüllt; Default `[]`, falls 1.1 nicht gelaufen ist oder der Template-Testrun leer war).\n\nZum Testen des Verhaltens ohne Folder/Klonen: `folder` auf `\"\"` setzen bzw. `{{clonedItems}}` in der Environment auf `[]` lassen – der echte Java-Client lässt diese Felder in dem Fall im Request-Body komplett weg statt leerer Werte zu senden.\n\n**Antworten:** `201` erstellt · `400` ungültige Parameter (z. B. `folder`-Pfad existiert nicht) · `401` Auth-Fehler."
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Upload Test Results",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"testCaseKey\": \"{{projectKey}}-T1\",\n    \"status\": \"Pass\"\n  },\n  {\n    \"testCaseKey\": \"{{projectKey}}-T2\",\n    \"status\": \"Fail\",\n    \"comment\": \"Beispiel-Kommentar bei Fehlschlag (Postman-Test)\"\n  }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/atm/1.0/testrun/{{testRunKey}}/testresults",
+              "host": ["{{baseUrl}}"],
+              "path": ["rest", "atm", "1.0", "testrun", "{{testRunKey}}", "testresults"]
+            },
+            "description": "Entspricht `ZephyrScaleClient.uploadTestResults()`. Nutzt `{{testRunKey}}` aus 1.2. Passe die `testCaseKey`-Werte auf echte Testfälle eures Projekts an, sonst liefert Zephyr ggf. `400` (Testfall nicht im Testrun gefunden).\n\n**Antworten:** `201` erstellt · `400` ungültige/nicht gefundene Testfall-Keys."
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Get Created Testrun (Verifikation)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rest/atm/1.0/testrun/{{testRunKey}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["rest", "atm", "1.0", "testrun", "{{testRunKey}}"]
+            },
+            "description": "Liest den in 1.2 angelegten Testrun zurück – zur Kontrolle, ob `folder` und `items` wie erwartet gesetzt wurden und ob die Ergebnisse aus 1.3 im Feld `items[].status` ankommen."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Jira (nur bei Fehlschlag)",
+      "description": "Der Service ruft dies nur auf, wenn jira.enabled=true UND der Testlauf fehlgeschlagen ist (exitCode != 0).",
+      "item": [
+        {
+          "name": "2.1 Create Jira Ticket",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": {\n    \"project\": { \"key\": \"{{projectKey}}\" },\n    \"summary\": \"Test Automation Failure: {{testRunKey}} [Postman]\",\n    \"description\": \"Testrun *{{testRunKey}}* ist fehlgeschlagen (Postman-Testaufruf).\",\n    \"issuetype\": { \"name\": \"{{jiraIssueType}}\" },\n    \"assignee\": { \"name\": \"{{jiraAssigneeAccountId}}\" }\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/api/2/issue",
+              "host": ["{{baseUrl}}"],
+              "path": ["rest", "api", "2", "issue"]
+            },
+            "description": "Entspricht `ZephyrScaleService.createJiraTicket()` / `JiraClient.createIssue()`. `assignee.name` muss ein gültiger Jira-Account-Identifier sein (`jira.default-assignee-account-id` in der App-Config).\n\n**Antworten:** `201` erstellt · `400` ungültige Felder (z. B. `assignee` unbekannt) · `401` Auth-Fehler."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "clonedItems",
+      "value": "[]",
+      "type": "string",
+      "description": "Wird automatisch aus 1.1 befüllt (JSON-Array-Text, z. B. '[{\"testCaseKey\":\"PROJ-T1\"}]'). Default [] = neuer Testrun ohne vorbelegte Testfälle."
+    },
+    {
+      "key": "testRunKey",
+      "value": "",
+      "type": "string",
+      "description": "Wird automatisch aus 1.2 befüllt (Key des neu angelegten Testruns, z. B. PROJ-R42)."
+    }
+  ]
+}

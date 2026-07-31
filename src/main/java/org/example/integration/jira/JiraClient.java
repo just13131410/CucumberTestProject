@@ -1,41 +1,39 @@
 package org.example.integration.jira;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.integration.AbstractAtlassianClient;
 import org.example.integration.model.JiraIssueRequest;
 import org.example.integration.model.JiraIssueResponse;
+import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-
 @Slf4j
 @Component
-public class JiraClient {
+public class JiraClient extends AbstractAtlassianClient {
 
     private static final String JIRA_API_BASE = "/rest/api/2";
 
-    private final RestTemplate restTemplate;
-    private final String baseUrl;
-    private final String authHeader;
-
+    // Jira und Zephyr Scale laufen auf derselben Jira-DC-Instanz, daher teilen sich
+    // JiraClient und ZephyrScaleClient bewusst dieselben zephyr.*-Auth-Properties
+    // statt eigener jira.*-Properties zu duplizieren.
+    // zephyr.* Werte bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
+    // Spring's @Value liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
     @Autowired
-    public JiraClient(
-            @Value("${zephyr.base-url:}") String baseUrl,
-            @Value("${zephyr.username:}") String username,
-            @Value("${zephyr.api-token:}") String apiToken) {
-        this(new RestTemplate(), baseUrl, username, apiToken);
+    public JiraClient() {
+        this(new RestTemplate(),
+                ConfigReader.get("zephyr.base-url", "https://jira.yourcompany.com"),
+                ConfigReader.get("zephyr.username", ""),
+                ConfigReader.get("zephyr.api-token", ""));
     }
 
     public JiraClient(RestTemplate restTemplate, String baseUrl, String username, String apiToken) {
-        this.restTemplate = restTemplate;
-        this.baseUrl = baseUrl;
-        String credentials = username + ":" + apiToken;
-        this.authHeader = "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
+        super(restTemplate, baseUrl, username, apiToken);
     }
 
     public JiraIssueResponse createIssue(JiraIssueRequest request) {
@@ -52,12 +50,5 @@ public class JiraClient {
             log.error("Jira createIssue failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
             return null;
         }
-    }
-
-    private HttpHeaders buildHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.AUTHORIZATION, authHeader);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
     }
 }

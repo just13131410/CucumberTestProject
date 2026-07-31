@@ -8,25 +8,23 @@ metadata:
   labels:
     app: wiremock
 data:
-  # GET /rest/atm/1.0/folder → leere Liste (zwingt den Service, createFolder aufzurufen)
-  folder-get.json: |
+  # Kein Folder-Mock: ZephyrScaleService legt keine Folder mehr an. "folder" wird beim
+  # Anlegen des Testruns als String-Pfad (zephyr.result-folder, z.B. "/Testautomation/Smoketest")
+  # mitgegeben - der Pfad muss in Zephyr bereits existieren, siehe testrun.schema unter
+  # https://support.smartbear.com/zephyr-scale-server/api-docs/v1/kanoah/testrun.schema.
+  # GET /rest/atm/1.0/testrun/{key} → Template-Testrun mit Testfaellen (zum Klonen via "items")
+  testrun-get.json: |
     {
-      "priority": 5,
-      "request": { "method": "GET", "urlPathPattern": "/rest/atm/1.0/folder.*" },
+      "request": { "method": "GET", "urlPathPattern": "/rest/atm/1.0/testrun/[^/]+" },
       "response": {
         "status": 200,
         "headers": { "Content-Type": "application/json" },
-        "jsonBody": []
-      }
-    }
-  # POST /rest/atm/1.0/folder → angelegter Ordner mit id
-  folder-post.json: |
-    {
-      "request": { "method": "POST", "urlPath": "/rest/atm/1.0/folder" },
-      "response": {
-        "status": 201,
-        "headers": { "Content-Type": "application/json" },
-        "jsonBody": { "id": 501, "name": "MockFolder", "projectKey": "QA", "type": "TEST_RUN" }
+        "jsonBody": {
+          "key": "QA-R1",
+          "projectKey": "QA",
+          "name": "Template Run",
+          "items": [ { "testCaseKey": "QA-T1" }, { "testCaseKey": "QA-T2" } ]
+        }
       }
     }
   # POST /rest/atm/1.0/testrun → angelegter Test-Cycle mit key + id

@@ -18,11 +18,17 @@ public abstract class BasePage {
     protected Browser browser;
     protected Page page;
 
+    private final BrowserConfig browserConfig;
+
+    protected BasePage(BrowserConfig browserConfig) {
+        this.browserConfig = browserConfig;
+    }
+
     public Page createPlaywrightPageInstance(String browserTypeAsString) {
         String normalized = (browserTypeAsString == null ? "chromium" : browserTypeAsString.trim()).toLowerCase();
 
         boolean mirrorEnabled = PlaywrightMirrorConfig.isMirrorEnabled();
-        String executablePath = ConfigReader.get("browser.executable.path", BrowserConfig.getExecutablePath());
+        String executablePath = ConfigReader.get("browser.executable.path", browserConfig.getExecutablePath());
         // Im Mirror-Modus wird immer der Playwright-eigene (über den Mirror geladene) Browser
         // genutzt; ein externer browser.executable.path wird bewusst ignoriert.
         boolean useExternalBrowser = !mirrorEnabled && executablePath != null && !executablePath.isBlank();
@@ -60,7 +66,7 @@ public abstract class BasePage {
             );
         };
 
-        boolean headless = BrowserConfig.isHeadless();
+        boolean headless = browserConfig.isHeadless();
         BrowserType.LaunchOptions options = new BrowserType.LaunchOptions().setHeadless(headless);
 
         if (useExternalBrowser) {
@@ -68,7 +74,7 @@ public abstract class BasePage {
         }
 
         // Zusätzliche Args aus browser.extra.args (z.B. --no-zygote für OpenShift seccomp).
-        java.util.List<String> extraArgs = BrowserConfig.getExtraArgs();
+        java.util.List<String> extraArgs = browserConfig.getExtraArgs();
         if (!extraArgs.isEmpty()) {
             options.setArgs(extraArgs);
         }

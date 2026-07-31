@@ -117,6 +117,88 @@ class ConfigReaderTest {
         assertEquals("fallback", result);
     }
 
+    // --- Trimming (unsichtbare \r/Whitespace aus .env/System-Property) ---
+
+    @Test
+    void get_SystemPropertyWithTrailingCarriageReturn_IsTrimmed() {
+        // Simuliert eine Windows-Zeilenende-.env-Datei: ein \r haengt unsichtbar am Wert.
+        System.setProperty("testKey", "geheimtoken123\r");
+
+        String result = ConfigReader.get("testKey", "default");
+
+        assertEquals("geheimtoken123", result, "trailing \\r muss entfernt werden");
+    }
+
+    @Test
+    void get_SystemPropertyWithSurroundingWhitespace_IsTrimmed() {
+        System.setProperty("testKey", "  max.mustermann  ");
+
+        String result = ConfigReader.get("testKey", "default");
+
+        assertEquals("max.mustermann", result);
+    }
+
+    @Test
+    void get_DefaultValue_IsNotTrimmed() {
+        // Default-Werte sind Konstanten im Code, keine Datei-Eingabe - werden bewusst nicht angefasst.
+        String result = ConfigReader.get("nonExistentKey", "  default  ");
+
+        assertEquals("  default  ", result);
+    }
+
+    // --- getWithSource Tests ---
+
+    @Test
+    void getWithSource_ReturnsSystemPropertySource_WhenSet() {
+        System.setProperty("testKey", "value");
+
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("testKey", "default");
+
+        assertEquals("value", result.value());
+        assertEquals("System-Property (-DtestKey)", result.source());
+    }
+
+    @Test
+    void getWithSource_ReturnsDefaultSource_WhenKeyNotFoundAnywhere() {
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("nonExistentKey", "fallback");
+
+        assertEquals("fallback", result.value());
+        assertEquals("Default", result.source());
+    }
+
+    @Test
+    void getWithSource_ReturnsClasspathSource_ForKnownPropertiesFileKey() {
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("baseUrl", "default");
+
+        assertEquals("config.properties (Classpath)", result.source());
+    }
+
+    @Test
+    void get_DelegatesToGetWithSource_SameValue() {
+        System.setProperty("testKey", "delegated");
+
+        assertEquals("delegated", ConfigReader.get("testKey", "default"));
+    }
+
+    // --- toEnvKey Tests ---
+
+    @Test
+    void toEnvKey_ConvertsDotsToUnderscores() {
+        assertEquals("BASE_URL", ConfigReader.toEnvKey("base.url"));
+    }
+
+    @Test
+    void toEnvKey_ConvertsHyphensToUnderscores() {
+        // Regression: "zephyr.api-token" ergab vorher "ZEPHYR_API-TOKEN" (Bindestrich blieb
+        // erhalten) statt "ZEPHYR_API_TOKEN" - Umgebungsvariable/.env-Eintrag wurden nie gefunden.
+        assertEquals("ZEPHYR_API_TOKEN", ConfigReader.toEnvKey("zephyr.api-token"));
+    }
+
+    @Test
+    void toEnvKey_ConvertsToUpperCase() {
+        assertEquals("APIURL", ConfigReader.toEnvKey("apiURL"));
+    }
+
     // --- loadSecretFiles Tests ---
 
     @Test

@@ -4,6 +4,8 @@ import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.jira.JiraClient;
 import org.example.integration.model.*;
+import org.example.integration.zephyr.CucumberResultReader;
+import org.example.integration.zephyr.MockIntegrationService;
 import org.example.integration.zephyr.ZephyrScaleClient;
 import org.example.integration.zephyr.ZephyrScaleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,7 +20,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -35,16 +36,20 @@ class ZephyrScaleServiceTest {
 
     private ZephyrScaleService service;
 
+    private MockIntegrationService mockIntegrationService;
+
     @BeforeEach
     void setUp() {
-        service = new ZephyrScaleService(zephyrClient, jiraClient);
+        mockIntegrationService = new MockIntegrationService();
+        ReflectionTestUtils.setField(mockIntegrationService, "zephyrBaseUrl", "https://jira.test.com");
+
+        service = new ZephyrScaleService(zephyrClient, jiraClient, new CucumberResultReader(), mockIntegrationService);
         ReflectionTestUtils.setField(service, "zephyrEnabled", true);
         ReflectionTestUtils.setField(service, "defaultProjectKey", "PROJ");
         ReflectionTestUtils.setField(service, "jiraEnabled", false);
         ReflectionTestUtils.setField(service, "jiraAssigneeAccountId", "automation-user");
         ReflectionTestUtils.setField(service, "jiraIssueType", "Bug");
         ReflectionTestUtils.setField(service, "mockEnabled", false);
-        ReflectionTestUtils.setField(service, "zephyrBaseUrl", "https://jira.test.com");
     }
 
     private TestExecutionRequest createRequest(List<String> tags) {
@@ -108,21 +113,74 @@ class ZephyrScaleServiceTest {
         verifyNoInteractions(zephyrClient, jiraClient);
     }
 
-    // --- Folder + Cycle creation ---
+    // --- Testrun-Erstellung: kein Folder-Anlegen mehr, "folder" ist ein String-Pfad aus der Config ---
 
     @Test
-    void uploadRunResults_CreatesFolderAndCycle() {
-        when(zephyrClient.getFolders("PROJ", "TEST_RUN")).thenReturn(List.of());
-        ZephyrFolder folder = new ZephyrFolder();
-        folder.setId(5L);
-        folder.setName("SmokeTest");
-        when(zephyrClient.createFolder("SmokeTest", "PROJ", "TEST_RUN")).thenReturn(folder);
+    void uploadRunResults_NoResultFolderConfigured_BodyHasNoFolderField() {
         stubCycle("T-R1");
 
         service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@SmokeTest")), 0, new TestStatus());
 
-        verify(zephyrClient).createFolder("SmokeTest", "PROJ", "TEST_RUN");
-        verify(zephyrClient).createTestCycle(argThat(m -> "PROJ".equals(m.get("projectKey"))));
+        verify(zephyrClient).createTestCycle(argThat(m ->
+                "PROJ".equals(m.get("projectKey")) && !m.containsKey("folder")));
+    }
+
+    @Test
+    void uploadRunResults_ResultFolderConfigured_IncludesFolderPathInBody() {
+        ReflectionTestUtils.setField(service, "resultFolder", "/Testautomation/Smoketest");
+        stubCycle("T-R1");
+
+        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@SmokeTest")), 0, new TestStatus());
+
+        verify(zephyrClient).createTestCycle(argThat(m ->
+                "/Testautomation/Smoketest".equals(m.get("folder"))));
+    }
+
+    // --- Testfaelle aus Template-Testrun klonen ---
+
+    @Test
+    void uploadRunResults_NoTemplateConfigured_CreatesRunWithoutItems() {
+        stubCycle("T-R1");
+
+        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@SmokeTest")), 0, new TestStatus());
+
+        verify(zephyrClient, never()).getTestRun(any());
+        verify(zephyrClient).createTestCycle(argThat(m -> !m.containsKey("items")));
+    }
+
+    @Test
+    void uploadRunResults_TemplateConfigured_ClonesTestCaseItemsIntoNewRun() {
+        ReflectionTestUtils.setField(service, "templateTestRunKey", "PROJ-R1");
+        ZephyrTestRun template = new ZephyrTestRun();
+        ZephyrTestRunItem item1 = new ZephyrTestRunItem();
+        item1.setTestCaseKey("PROJ-T1");
+        ZephyrTestRunItem item2 = new ZephyrTestRunItem();
+        item2.setTestCaseKey("PROJ-T2");
+        template.setItems(List.of(item1, item2));
+        when(zephyrClient.getTestRun("PROJ-R1")).thenReturn(template);
+        stubCycle("T-R2");
+
+        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@SmokeTest")), 0, new TestStatus());
+
+        verify(zephyrClient).getTestRun("PROJ-R1");
+        verify(zephyrClient).createTestCycle(argThat(m -> {
+            @SuppressWarnings("unchecked")
+            List<java.util.Map<String, String>> items = (List<java.util.Map<String, String>>) m.get("items");
+            return items != null && items.size() == 2
+                    && "PROJ-T1".equals(items.get(0).get("testCaseKey"))
+                    && "PROJ-T2".equals(items.get(1).get("testCaseKey"));
+        }));
+    }
+
+    @Test
+    void uploadRunResults_TemplateTestRunNotFound_CreatesRunWithoutItems() {
+        ReflectionTestUtils.setField(service, "templateTestRunKey", "PROJ-R404");
+        when(zephyrClient.getTestRun("PROJ-R404")).thenReturn(null);
+        stubCycle("T-R3");
+
+        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@SmokeTest")), 0, new TestStatus());
+
+        verify(zephyrClient).createTestCycle(argThat(m -> !m.containsKey("items")));
     }
 
     // --- Cucumber JSON parsing (detailed mode) ---
@@ -142,10 +200,6 @@ class ZephyrScaleServiceTest {
 
         System.setProperty("test.results.path", tempDir.toString());
         try {
-            when(zephyrClient.getFolders(any(), any())).thenReturn(List.of());
-            ZephyrFolder folder = new ZephyrFolder();
-            folder.setId(1L);
-            when(zephyrClient.createFolder(any(), any(), any())).thenReturn(folder);
             stubCycle("T-R1");
 
             service.uploadRunResults(runId, createRequest(List.of("@Backend")), 0, new TestStatus());
@@ -153,7 +207,7 @@ class ZephyrScaleServiceTest {
             verify(zephyrClient).uploadTestResults(eq("T-R1"), argThat(execs ->
                     execs.size() == 1
                             && "T-3511".equals(execs.get(0).getTestCaseKey())
-                            && "Pass".equals(execs.get(0).getStatusName())));
+                            && "Pass".equals(execs.get(0).getStatus())));
         } finally {
             System.clearProperty("test.results.path");
         }
@@ -163,8 +217,6 @@ class ZephyrScaleServiceTest {
 
     @Test
     void uploadRunResults_FallbackMode_UsesOverallStatus() {
-        when(zephyrClient.getFolders(any(), any())).thenReturn(List.of());
-        when(zephyrClient.createFolder(any(), any(), any())).thenReturn(null);
         UUID runId = UUID.randomUUID();
         stubCycle("T-R2");
 
@@ -173,7 +225,7 @@ class ZephyrScaleServiceTest {
             service.uploadRunResults(runId, createRequest(List.of("@Backend")), 1, new TestStatus());
 
             verify(zephyrClient).uploadTestResults(eq("T-R2"), argThat(execs ->
-                    execs.size() == 1 && "Fail".equals(execs.get(0).getStatusName())));
+                    execs.size() == 1 && "Fail".equals(execs.get(0).getStatus())));
         } finally {
             System.clearProperty("test.results.path");
         }
@@ -184,8 +236,6 @@ class ZephyrScaleServiceTest {
     @Test
     void uploadRunResults_FailedRun_CreatesJiraTicket() {
         ReflectionTestUtils.setField(service, "jiraEnabled", true);
-        when(zephyrClient.getFolders(any(), any())).thenReturn(List.of());
-        when(zephyrClient.createFolder(any(), any(), any())).thenReturn(null);
         stubCycle("T-R3");
         JiraIssueResponse jiraResponse = new JiraIssueResponse();
         jiraResponse.setKey("PROJ-99");
@@ -203,8 +253,6 @@ class ZephyrScaleServiceTest {
     @Test
     void uploadRunResults_SuccessfulRun_NoJiraTicket() {
         ReflectionTestUtils.setField(service, "jiraEnabled", true);
-        when(zephyrClient.getFolders(any(), any())).thenReturn(List.of());
-        when(zephyrClient.createFolder(any(), any(), any())).thenReturn(null);
         stubCycle("T-R4");
 
         service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@smoke")), 0, new TestStatus());
@@ -216,8 +264,6 @@ class ZephyrScaleServiceTest {
 
     @Test
     void uploadRunResults_StoresKeysInMetadata() {
-        when(zephyrClient.getFolders(any(), any())).thenReturn(List.of());
-        when(zephyrClient.createFolder(any(), any(), any())).thenReturn(null);
         stubCycle("T-R5");
 
         TestStatus status = new TestStatus();
@@ -230,8 +276,6 @@ class ZephyrScaleServiceTest {
     @Test
     void uploadRunResults_FailedRun_StoresJiraKeyInMetadataAndDedicatedField() {
         ReflectionTestUtils.setField(service, "jiraEnabled", true);
-        when(zephyrClient.getFolders(any(), any())).thenReturn(List.of());
-        when(zephyrClient.createFolder(any(), any(), any())).thenReturn(null);
         stubCycle("T-R6");
         JiraIssueResponse jiraResponse = new JiraIssueResponse();
         jiraResponse.setKey("PROJ-55");
@@ -245,36 +289,6 @@ class ZephyrScaleServiceTest {
         assertEquals("PROJ-55", status.getJiraTicketKey(),
                 "jiraTicketKey must be set as dedicated field for the status endpoint response");
     }
-
-    // --- Folder mapping ---
-
-    @Test
-    void folderMapping_SmokeTestTag_ReturnsSmokeTestFolder() {
-        when(zephyrClient.getFolders("PROJ", "TEST_RUN")).thenReturn(List.of());
-        ZephyrFolder folder = new ZephyrFolder();
-        folder.setId(1L);
-        when(zephyrClient.createFolder(eq("SmokeTest"), eq("PROJ"), eq("TEST_RUN"))).thenReturn(folder);
-        stubCycle("T-R7");
-
-        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@SmokeTest")), 0, new TestStatus());
-
-        verify(zephyrClient).createFolder("SmokeTest", "PROJ", "TEST_RUN");
-    }
-
-    @Test
-    void folderMapping_FrontendTag_ReturnsFrontendFolder() {
-        when(zephyrClient.getFolders("PROJ", "TEST_RUN")).thenReturn(List.of());
-        ZephyrFolder folder = new ZephyrFolder();
-        folder.setId(2L);
-        when(zephyrClient.createFolder(eq("Frontend"), eq("PROJ"), eq("TEST_RUN"))).thenReturn(folder);
-        stubCycle("T-R8");
-
-        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@Frontend")), 0, new TestStatus());
-
-        verify(zephyrClient).createFolder("Frontend", "PROJ", "TEST_RUN");
-    }
-
-    // --- Existing folder reuse ---
 
     // --- Mock-Modus ---
 
@@ -331,19 +345,5 @@ class ZephyrScaleServiceTest {
 
         assertEquals(s1.getJiraTicketKey(), s2.getJiraTicketKey(),
                 "gleiche runId muss immer denselben Ticket-Key erzeugen");
-    }
-
-    @Test
-    void uploadRunResults_ExistingFolder_SkipsCreation() {
-        ZephyrFolder existing = new ZephyrFolder();
-        existing.setId(99L);
-        existing.setName("Backend");
-        when(zephyrClient.getFolders("PROJ", "TEST_RUN")).thenReturn(List.of(existing));
-        stubCycle("T-R9");
-
-        service.uploadRunResults(UUID.randomUUID(), createRequest(List.of("@Backend")), 0, new TestStatus());
-
-        verify(zephyrClient, never()).createFolder(any(), any(), any());
-        verify(zephyrClient).createTestCycle(argThat(m -> Long.valueOf(99L).equals(m.get("folderId"))));
     }
 }

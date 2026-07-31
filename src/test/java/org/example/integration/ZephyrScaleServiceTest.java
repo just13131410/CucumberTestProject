@@ -207,7 +207,7 @@ class ZephyrScaleServiceTest {
             verify(zephyrClient).uploadTestResults(eq("T-R1"), argThat(execs ->
                     execs.size() == 1
                             && "T-3511".equals(execs.get(0).getTestCaseKey())
-                            && "Pass".equals(execs.get(0).getStatusName())));
+                            && "Pass".equals(execs.get(0).getStatus())));
         } finally {
             System.clearProperty("test.results.path");
         }
@@ -225,7 +225,7 @@ class ZephyrScaleServiceTest {
             service.uploadRunResults(runId, createRequest(List.of("@Backend")), 1, new TestStatus());
 
             verify(zephyrClient).uploadTestResults(eq("T-R2"), argThat(execs ->
-                    execs.size() == 1 && "Fail".equals(execs.get(0).getStatusName())));
+                    execs.size() == 1 && "Fail".equals(execs.get(0).getStatus())));
         } finally {
             System.clearProperty("test.results.path");
         }

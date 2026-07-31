@@ -151,7 +151,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "[\n  {\n    \"testCaseKey\": \"{{projectKey}}-T1\",\n    \"statusName\": \"Pass\"\n  },\n  {\n    \"testCaseKey\": \"{{projectKey}}-T2\",\n    \"statusName\": \"Fail\",\n    \"comment\": \"Beispiel-Kommentar bei Fehlschlag (Postman-Test)\"\n  }\n]",
+              "raw": "[\n  {\n    \"testCaseKey\": \"{{projectKey}}-T1\",\n    \"status\": \"Pass\"\n  },\n  {\n    \"testCaseKey\": \"{{projectKey}}-T2\",\n    \"status\": \"Fail\",\n    \"comment\": \"Beispiel-Kommentar bei Fehlschlag (Postman-Test)\"\n  }\n]",
               "options": { "raw": { "language": "json" } }
             },
             "url": {

@@ -69,7 +69,7 @@ class ZephyrScaleClientTest {
         List<ZephyrTestExecution> executions = List.of(
                 ZephyrTestExecution.builder()
                         .testCaseKey("T-3511")
-                        .statusName("Pass")
+                        .status("Pass")
                         .build());
 
         zephyrClient.uploadTestResults("T-R42", executions);

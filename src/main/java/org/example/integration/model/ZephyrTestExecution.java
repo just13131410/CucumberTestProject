@@ -16,6 +16,6 @@ import lombok.NoArgsConstructor;
 public class ZephyrTestExecution {
 
     private String testCaseKey;
-    private String statusName;
+    private String status;
     private String comment;
 }

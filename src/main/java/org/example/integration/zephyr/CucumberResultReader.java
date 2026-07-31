@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Liest das Cucumber-JSON-Ergebnis eines Runs und wandelt es in Zephyr-Testausfuehrungen um.
@@ -43,7 +44,7 @@ public class CucumberResultReader {
         }
         return List.of(ZephyrTestExecution.builder()
                 .testCaseKey(runId.toString().substring(0, 8))
-                .statusName(exitCode == 0 ? "Pass" : "Fail")
+                .status(exitCode == 0 ? "Pass" : "Fail")
                 .comment("Run: " + runId)
                 .build());
     }
@@ -62,7 +63,7 @@ public class CucumberResultReader {
                             .allMatch(s -> s.getResult() != null && "passed".equals(s.getResult().getStatus()));
                     executions.add(ZephyrTestExecution.builder()
                             .testCaseKey(testCaseKey)
-                            .statusName(allPassed ? "Pass" : "Fail")
+                            .status(allPassed ? "Pass" : "Fail")
                             .build());
                 }
             }
@@ -73,10 +74,16 @@ public class CucumberResultReader {
         }
     }
 
+    /**
+     * Erkennt sowohl projekt-praefixierte Zephyr-Keys ({@code @PROJ-T53}) als auch die
+     * einfache interne Tag-Konvention ohne Projekt-Praefix ({@code @T-3511}).
+     */
+    private static final Pattern TEST_CASE_TAG = Pattern.compile("^@([A-Za-z][A-Za-z0-9]*-)?T-?\\d+$");
+
     private String extractTestCaseKey(List<CucumberTag> tags) {
         if (tags == null) return null;
         return tags.stream()
-                .filter(t -> t.getName() != null && t.getName().startsWith("@T-"))
+                .filter(t -> t.getName() != null && TEST_CASE_TAG.matcher(t.getName()).matches())
                 .map(t -> t.getName().substring(1))
                 .findFirst()
                 .orElse(null);

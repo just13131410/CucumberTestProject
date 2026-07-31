@@ -71,7 +71,7 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
                     new HttpEntity<>(executions, buildHeaders()), Void.class);
             executions.forEach(e ->
                     log.info("Zephyr Execution uploaded: testCaseKey={}, status={}",
-                            e.getTestCaseKey(), e.getStatusName()));
+                            e.getTestCaseKey(), e.getStatus()));
         } catch (HttpStatusCodeException e) {
             log.error("Zephyr uploadTestResults failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
         }

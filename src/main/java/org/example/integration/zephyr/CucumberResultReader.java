@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.integration.model.ZephyrScriptResult;
 import org.example.integration.model.ZephyrTestExecution;
 import org.springframework.stereotype.Component;
 
@@ -66,6 +67,7 @@ public class CucumberResultReader {
                             .testCaseKey(testCaseKey)
                             .status(allPassed ? "Pass" : "Fail")
                             .comment(buildStepComment(steps))
+                            .scriptResults(buildScriptResults(steps))
                             .build());
                 }
             }
@@ -107,6 +109,46 @@ public class CucumberResultReader {
             }
         }
         return comment.toString();
+    }
+
+    /**
+     * Baut den strukturierten Schritt-Status ({@code scriptResults}), damit Zephyr nicht nur den
+     * Gesamtstatus des Testfalls, sondern auch den Status jedes einzelnen Skript-Schritts zeigt.
+     * {@code index} muss zur Position des zugehoerigen Schritts im Zephyr-Testfall-Skript passen
+     * (setzt eine 1:1-Zuordnung BDD-Schritt zu Zephyr-Skript-Schritt in derselben Reihenfolge voraus).
+     */
+    private List<ZephyrScriptResult> buildScriptResults(List<CucumberStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return null;
+        }
+        List<ZephyrScriptResult> scriptResults = new ArrayList<>();
+        for (int i = 0; i < steps.size(); i++) {
+            CucumberStep step = steps.get(i);
+            String status = step.getResult() != null ? step.getResult().getStatus() : null;
+            String comment = null;
+            if ("failed".equals(status)) {
+                String errorMessage = step.getResult().getErrorMessage();
+                if (errorMessage != null && !errorMessage.isBlank()) {
+                    comment = firstLine(errorMessage);
+                }
+            }
+            scriptResults.add(ZephyrScriptResult.builder()
+                    .index(i)
+                    .status(mapStepStatus(status))
+                    .comment(comment)
+                    .build());
+        }
+        return scriptResults;
+    }
+
+    private static String mapStepStatus(String cucumberStatus) {
+        if ("passed".equals(cucumberStatus)) {
+            return "Pass";
+        }
+        if ("failed".equals(cucumberStatus)) {
+            return "Fail";
+        }
+        return "Not Executed";
     }
 
     private static String firstLine(String text) {

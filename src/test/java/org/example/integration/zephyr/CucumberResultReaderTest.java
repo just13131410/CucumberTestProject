@@ -1,5 +1,6 @@
 package org.example.integration.zephyr;
 
+import org.example.integration.model.ZephyrScriptResult;
 import org.example.integration.model.ZephyrTestExecution;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -16,12 +17,11 @@ class CucumberResultReaderTest {
 
     private final CucumberResultReader reader = new CucumberResultReader();
 
-    private Path writeCucumberJson(Path tempDir, UUID runId, String json) throws IOException {
+    private void writeCucumberJson(Path tempDir, UUID runId, String json) throws IOException {
         Path cucumberDir = tempDir.resolve(runId.toString()).resolve("cucumber-reports");
         Files.createDirectories(cucumberDir);
         Path file = cucumberDir.resolve("Cucumber.json");
         Files.writeString(file, json);
-        return file;
     }
 
     @Test
@@ -46,6 +46,14 @@ class CucumberResultReaderTest {
             assertEquals("Pass", execution.getStatus());
             assertEquals("✅ Gegeben sei ich oeffne die Login-Seite<br>✅ Dann sollte ich das Dashboard sehen",
                     execution.getComment());
+
+            List<ZephyrScriptResult> scriptResults = execution.getScriptResults();
+            assertEquals(2, scriptResults.size());
+            assertEquals(0, scriptResults.get(0).getIndex());
+            assertEquals("Pass", scriptResults.get(0).getStatus());
+            assertNull(scriptResults.get(0).getComment());
+            assertEquals(1, scriptResults.get(1).getIndex());
+            assertEquals("Pass", scriptResults.get(1).getStatus());
         } finally {
             System.clearProperty("test.results.path");
         }
@@ -74,6 +82,13 @@ class CucumberResultReaderTest {
                             + "<br>❌ Wenn ich auf Suche klicke<br>&nbsp;&nbsp;&nbsp;Fehler: TimeoutError: timeout 30000ms exceeded"
                             + "<br>⏭️ Dann sollte die Tabelle 1 Zeile zeigen",
                     execution.getComment());
+
+            List<ZephyrScriptResult> scriptResults = execution.getScriptResults();
+            assertEquals(3, scriptResults.size());
+            assertEquals("Pass", scriptResults.get(0).getStatus());
+            assertEquals("Fail", scriptResults.get(1).getStatus());
+            assertEquals("TimeoutError: timeout 30000ms exceeded", scriptResults.get(1).getComment());
+            assertEquals("Not Executed", scriptResults.get(2).getStatus());
         } finally {
             System.clearProperty("test.results.path");
         }

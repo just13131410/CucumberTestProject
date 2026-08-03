@@ -94,4 +94,15 @@ public class TestExecutionRequest {
     @Schema(description = "Jira/Zephyr Scale Projekt-Schluessel (optional, z.B. PROJ)",
             example = "PROJ")
     private String projectKey;
+
+    @Schema(description = "Zephyr-Testrun-Key, dessen Testfaelle in den neuen Cycle geklont werden "
+            + "(optional, ueberschreibt zephyr.template-test-run-key fuer diesen Lauf - z.B. fuer einen "
+            + "abweichenden Testfallsatz wie API-Tests)",
+            example = "PROJ-C15")
+    private String zephyrTemplateTestRunKey;
+
+    @Schema(description = "Zephyr-Folder-Pfad, dem der neue Cycle zugeordnet wird (optional, ueberschreibt "
+            + "zephyr.result-folder fuer diesen Lauf)",
+            example = "/Testautomation/API")
+    private String zephyrResultFolder;
 }

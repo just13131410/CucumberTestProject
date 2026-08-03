@@ -136,6 +136,20 @@ class ZephyrScaleServiceTest {
                 "/Testautomation/Smoketest".equals(m.get("folder"))));
     }
 
+    @Test
+    void uploadRunResults_RequestResultFolderOverridesGlobalConfig() {
+        ReflectionTestUtils.setField(service, "resultFolder", "/Testautomation/Smoketest");
+        stubCycle("T-R1");
+
+        TestExecutionRequest req = createRequest(List.of("@API-Test"));
+        req.setZephyrResultFolder("/Testautomation/API");
+
+        service.uploadRunResults(UUID.randomUUID(), req, 0, new TestStatus());
+
+        verify(zephyrClient).createTestCycle(argThat(m ->
+                "/Testautomation/API".equals(m.get("folder"))));
+    }
+
     // --- Testfaelle aus Template-Testrun klonen ---
 
     @Test
@@ -169,6 +183,30 @@ class ZephyrScaleServiceTest {
             return items != null && items.size() == 2
                     && "PROJ-T1".equals(items.get(0).get("testCaseKey"))
                     && "PROJ-T2".equals(items.get(1).get("testCaseKey"));
+        }));
+    }
+
+    @Test
+    void uploadRunResults_RequestTemplateOverridesGlobalConfig_ClonesFromRequestTemplate() {
+        ReflectionTestUtils.setField(service, "templateTestRunKey", "PROJ-R1");
+        ZephyrTestRun apiTemplate = new ZephyrTestRun();
+        ZephyrTestRunItem apiItem = new ZephyrTestRunItem();
+        apiItem.setTestCaseKey("PROJ-T99");
+        apiTemplate.setItems(List.of(apiItem));
+        when(zephyrClient.getTestRun("PROJ-R2")).thenReturn(apiTemplate);
+        stubCycle("T-R2");
+
+        TestExecutionRequest req = createRequest(List.of("@API-Test"));
+        req.setZephyrTemplateTestRunKey("PROJ-R2");
+
+        service.uploadRunResults(UUID.randomUUID(), req, 0, new TestStatus());
+
+        verify(zephyrClient, never()).getTestRun("PROJ-R1");
+        verify(zephyrClient).getTestRun("PROJ-R2");
+        verify(zephyrClient).createTestCycle(argThat(m -> {
+            @SuppressWarnings("unchecked")
+            List<java.util.Map<String, String>> items = (List<java.util.Map<String, String>>) m.get("items");
+            return items != null && items.size() == 1 && "PROJ-T99".equals(items.get(0).get("testCaseKey"));
         }));
     }
 

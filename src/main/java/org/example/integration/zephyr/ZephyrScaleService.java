@@ -170,13 +170,14 @@ public class ZephyrScaleService {
         String date = LocalDate.now().format(DATE_FMT);
         String cycleName = (date + " " + shortRunId + (tags.isBlank() ? "" : " " + tags)).trim();
 
+        String folder = resolveResultFolder(request);
         Map<String, Object> body = new HashMap<>();
         body.put("name", cycleName);
         body.put("projectKey", projectKey);
-        if (resultFolder != null && !resultFolder.isBlank()) {
-            body.put("folder", resultFolder);
+        if (folder != null && !folder.isBlank()) {
+            body.put("folder", folder);
         }
-        List<Map<String, String>> clonedItems = cloneTestCaseItems();
+        List<Map<String, String>> clonedItems = cloneTestCaseItems(resolveTemplateTestRunKey(request));
         if (!clonedItems.isEmpty()) {
             body.put("items", clonedItems);
         }
@@ -185,19 +186,35 @@ public class ZephyrScaleService {
         return cycle != null ? cycle.getKey() : null;
     }
 
+    /** Request-Override hat Vorrang vor {@code zephyr.template-test-run-key}, z.B. fuer einen abweichenden Testfallsatz (API-Tests). */
+    private String resolveTemplateTestRunKey(TestExecutionRequest request) {
+        if (request.getZephyrTemplateTestRunKey() != null && !request.getZephyrTemplateTestRunKey().isBlank()) {
+            return request.getZephyrTemplateTestRunKey();
+        }
+        return templateTestRunKey;
+    }
+
+    /** Request-Override hat Vorrang vor {@code zephyr.result-folder}. */
+    private String resolveResultFolder(TestExecutionRequest request) {
+        if (request.getZephyrResultFolder() != null && !request.getZephyrResultFolder().isBlank()) {
+            return request.getZephyrResultFolder();
+        }
+        return resultFolder;
+    }
+
     /**
-     * Liest die Testfaelle des konfigurierten Template-Testruns ({@code zephyr.template-test-run-key})
-     * und baut daraus die "items"-Liste fuer POST /testrun, damit der neu angelegte Testrun
-     * dieselben Testfaelle enthaelt ("klonen"). Ohne konfigurierten Template-Key oder falls der
-     * Template-Testrun nicht lesbar ist, wird der neue Testrun ohne vorbelegte Testfaelle angelegt.
+     * Liest die Testfaelle des Template-Testruns ({@code templateKey}, aufgeloest aus Request-Override
+     * oder {@code zephyr.template-test-run-key}) und baut daraus die "items"-Liste fuer POST /testrun,
+     * damit der neu angelegte Testrun dieselben Testfaelle enthaelt ("klonen"). Ohne Template-Key oder
+     * falls der Template-Testrun nicht lesbar ist, wird der neue Testrun ohne vorbelegte Testfaelle angelegt.
      */
-    private List<Map<String, String>> cloneTestCaseItems() {
-        if (templateTestRunKey == null || templateTestRunKey.isBlank()) {
+    private List<Map<String, String>> cloneTestCaseItems(String templateKey) {
+        if (templateKey == null || templateKey.isBlank()) {
             return List.of();
         }
-        ZephyrTestRun template = zephyrClient.getTestRun(templateTestRunKey);
+        ZephyrTestRun template = zephyrClient.getTestRun(templateKey);
         if (template == null || template.getItems() == null) {
-            log.warn("Template-Testrun '{}' nicht gefunden oder enthaelt keine Testfaelle", templateTestRunKey);
+            log.warn("Template-Testrun '{}' nicht gefunden oder enthaelt keine Testfaelle", templateKey);
             return List.of();
         }
         return template.getItems().stream()

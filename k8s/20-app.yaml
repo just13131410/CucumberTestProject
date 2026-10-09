@@ -1,6 +1,9 @@
 # cucumber-test-service auf k3s (Rancher Desktop). Integration zeigt auf WireMock statt echtem Jira.
 # Image lokal bauen (siehe README) – kein Registry-Pull, daher imagePullPolicy: IfNotPresent.
 #
+# Browser: Playwright-Server als Sidecar (k8s/playwright-server/Dockerfile), Verbindung per
+# PLAYWRIGHT_MODE=remote + PLAYWRIGHT_REMOTE_ENDPOINT=ws://localhost:3000/.
+#
 # Phase 0 (docs/lasttest-analyse-und-umsetzungsplan.md): native Speicher-Caps + Guaranteed QoS +
 # entkoppelte Probes, damit ein Testlauf den Pod nicht mehr über das 2-Gi-Limit OOMKillt.
 apiVersion: v1
@@ -66,11 +69,31 @@ spec:
             # Todo-API-Fixture für die @API-Test-Szenarien (Service im selben Namespace).
             - name: TODOAPIURL
               value: "http://allure-todo-api:3000"
-            # ---- Ohne Playwright-Browser: für die Integrationsprüfung reichen API-Tests ----
+            # ---- Browser läuft im Playwright-Sidecar (s.u.), nicht in diesem Container ----
+            # playwright.mode=remote: kein Browser-Download/-Start in diesem Container.
+            # (mode=local würde den Browser hier starten – Mirror bzw. browser.executable.path.)
+            - name: PLAYWRIGHT_MODE
+              value: "remote"
+            - name: PLAYWRIGHT_REMOTE_ENDPOINT
+              value: "ws://localhost:3000/"
             - name: PLAYWRIGHT_MIRROR_ENABLED
               value: "false"
             - name: PLAYWRIGHT_INSTALL_ON_STARTUP
               value: "false"
+            # Testziel der @GUI-Szenarien. Der Browser (Sidecar) löst die URL auf, nicht die JVM.
+            - name: BASEURL
+              value: "http://angular-gui:8080/"
+            # dev-Profil setzt browser.headless=false (lokales Debugging) → im Cluster ohne X-Server überschreiben.
+            - name: BROWSER_HEADLESS
+              value: "true"
+            # Werden per x-playwright-launch-options an den Sidecar durchgereicht. Nötig, weil die
+            # Angular-App crypto.randomUUID()/Clipboard nutzt – nur im Secure Context (HTTPS oder
+            # localhost) verfügbar; http://angular-gui:8080 wäre sonst "insecure". Das Flag wirkt
+            # nur im vollen Chromium (channel=chromium), die Headless-Shell ignoriert es.
+            - name: PLAYWRIGHT_REMOTE_CHANNEL
+              value: "chromium"
+            - name: BROWSER_EXTRA_ARGS
+              value: "--unsafely-treat-insecure-origin-as-secure=http://angular-gui:8080"
             - name: MANAGEMENT_SERVER_PORT
               value: "8081"
             # ---- Native-Speicher zähmen (glibc-Malloc-Arenen), höchster ROI, risikolos ----
@@ -119,10 +142,48 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 6
+        # ---- Sidecar: offizielles Playwright-(Node)-Image als Remote-Browser ----
+        # Lauscht nur auf 127.0.0.1:3000 → Zugriff ausschließlich pod-intern via localhost;
+        # NetworkPolicies zwischen Pods spielen dafür keine Rolle. Browser-Speicher hat ein
+        # eigenes Limit und belastet nicht mehr die 2-Gi-cgroup der JVM.
+        - name: playwright-server
+          image: playwright-server:1.58.0
+          imagePullPolicy: IfNotPresent
+          # exec statt httpGet: Der Server lauscht nur auf 127.0.0.1, der Kubelet erreicht ihn von
+          # außen nicht. GET / liefert 200 "Running". Bewusst keine readinessProbe: ein nicht
+          # bereiter Sidecar würde den ganzen Pod aus dem Service nehmen und auch API-Tests blockieren.
+          startupProbe:
+            exec:
+              command: ["node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+            periodSeconds: 3
+            timeoutSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            exec:
+              command: ["node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+            periodSeconds: 20
+            # großzügig: unter Last (paralleler Pod-/JVM-Start) kann schon der exec selbst Sekunden dauern
+            timeoutSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "3Gi"
+              cpu: "2"
       volumes:
         - name: test-results
           persistentVolumeClaim:
             claimName: test-results-pvc
+        # Chromium nutzt /dev/shm intensiv; Container-Default (64 Mi) führt zu Tab-Crashes.
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service

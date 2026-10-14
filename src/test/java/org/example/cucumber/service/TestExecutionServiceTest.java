@@ -1,5 +1,6 @@
 package org.example.cucumber.service;
 
+import org.example.cucumber.model.RunState;
 import org.example.CucumberRunnerService;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
@@ -63,7 +64,7 @@ class TestExecutionServiceTest {
         return request;
     }
 
-    private void awaitStatus(UUID runId, String expectedStatus) {
+    private void awaitStatus(UUID runId, RunState expectedStatus) {
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
             assertTrue(status.isPresent());
@@ -106,7 +107,7 @@ class TestExecutionServiceTest {
 
         assertNotNull(response);
         assertNotNull(response.getRunId());
-        assertEquals("QUEUED", response.getStatus());
+        assertEquals(RunState.QUEUED, response.getStatus());
         assertEquals("dev", response.getEnvironment());
         assertEquals("Test execution queued successfully", response.getMessage());
         assertTrue(response.getStatusUrl().contains(response.getRunId().toString()));
@@ -144,7 +145,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertEquals(100, finalStatus.getProgress());
@@ -161,7 +162,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "FAILED");
+        awaitStatus(runId, RunState.FAILED);
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertNotNull(finalStatus.getErrorMessage());
@@ -177,7 +178,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "FAILED");
+        awaitStatus(runId, RunState.FAILED);
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertTrue(finalStatus.getErrorMessage().contains("Cucumber crashed"));
@@ -222,7 +223,7 @@ class TestExecutionServiceTest {
             List<TestStatus> active = testExecutionService.getActiveTests();
             assertFalse(active.isEmpty());
             assertTrue(active.stream().allMatch(t ->
-                    "QUEUED".equals(t.getStatus()) || "RUNNING".equals(t.getStatus())));
+                    RunState.QUEUED == t.getStatus() || RunState.RUNNING == t.getStatus()));
         });
 
         blockLatch.countDown(); // unblock
@@ -253,13 +254,13 @@ class TestExecutionServiceTest {
         await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
             Optional<TestStatus> status = testExecutionService.getTestStatus(response.getRunId());
             assertTrue(status.isPresent());
-            assertTrue(List.of("QUEUED", "RUNNING").contains(status.get().getStatus()));
+            assertTrue(List.of(RunState.QUEUED, RunState.RUNNING).contains(status.get().getStatus()));
         });
 
         Optional<TestStatus> cancelled = testExecutionService.cancelTestExecution(response.getRunId());
 
         if (cancelled.isPresent()) {
-            assertEquals("CANCELLED", cancelled.get().getStatus());
+            assertEquals(RunState.CANCELLED, cancelled.get().getStatus());
             assertEquals(response.getRunId(), cancelled.get().getRunId());
         }
 
@@ -282,7 +283,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         assertTrue(testExecutionService.deleteTestExecution(runId));
         assertFalse(testExecutionService.getTestStatus(runId).isPresent());
@@ -303,7 +304,7 @@ class TestExecutionServiceTest {
         await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
             Optional<TestStatus> status = testExecutionService.getTestStatus(response.getRunId());
             assertTrue(status.isPresent());
-            assertTrue(List.of("QUEUED", "RUNNING").contains(status.get().getStatus()));
+            assertTrue(List.of(RunState.QUEUED, RunState.RUNNING).contains(status.get().getStatus()));
         });
 
         assertFalse(testExecutionService.deleteTestExecution(response.getRunId()));
@@ -376,7 +377,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
 
         assertNotNull(response);
-        assertEquals("QUEUED", response.getStatus());
+        assertEquals(RunState.QUEUED, response.getStatus());
     }
 
     @Test
@@ -387,7 +388,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
 
         assertNotNull(response);
-        assertEquals("QUEUED", response.getStatus());
+        assertEquals(RunState.QUEUED, response.getStatus());
     }
 
     // --- reportUrls: accessibility nur für Frontend-Tests ---
@@ -402,7 +403,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
         assertEquals(expectPresent, urls.containsKey("accessibility"));
@@ -428,7 +429,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
         assertTrue(urls.get("accessibility").contains("/axe-result/index.html"));
@@ -445,7 +446,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
 
@@ -485,7 +486,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         String duration = testExecutionService.getTestStatus(runId).orElseThrow().getDuration();
         assertNotNull(duration);
@@ -498,7 +499,7 @@ class TestExecutionServiceTest {
     private TestExecutionService newService(int maxConcurrentRuns, int maxQueueSize) {
         return new TestExecutionService(
                 cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
-                new RunStatusRegistry(24, 500), new AllureReportService(), maxConcurrentRuns, maxQueueSize);
+                new RunStatusRegistry(24, 500), new AllureReportService(), maxConcurrentRuns, maxQueueSize, "");
     }
 
     @Test
@@ -540,7 +541,7 @@ class TestExecutionServiceTest {
             TestExecutionRequest req = createRequest("dev", List.of("@smoke"));
             svc.queueTestExecution(req); // belegt den einen Ausführungs-Thread
             await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
-                    assertTrue(svc.getActiveTests().stream().anyMatch(s -> "RUNNING".equals(s.getStatus()))));
+                    assertTrue(svc.getActiveTests().stream().anyMatch(s -> RunState.RUNNING == s.getStatus())));
             svc.queueTestExecution(req); // füllt die Queue (Größe 1)
 
             assertThrows(CapacityExceededException.class,
@@ -550,5 +551,83 @@ class TestExecutionServiceTest {
         } finally {
             svc.shutdown();
         }
+    }
+
+    // --- S2: Allowlist für Request-Overrides ---
+
+    @Test
+    void filterOverrides_OnlyAllowlistedKeysPass() {
+        Map<String, String> requested = new java.util.LinkedHashMap<>();
+        requested.put("TEST_ENV", "qa");
+        requested.put("apiURL", "https://evil.example");
+        requested.put("playwright.download.host", "http://evil.example");
+        requested.put("javax.net.ssl.trustStore", "/tmp/evil.jks");
+
+        Map<String, String> result = TestExecutionService.filterOverrides(requested, java.util.Set.of("TEST_ENV"));
+
+        assertEquals(Map.of("TEST_ENV", "qa"), result);
+    }
+
+    @Test
+    void filterOverrides_EmptyAllowlistBlocksEverything() {
+        assertTrue(TestExecutionService.filterOverrides(Map.of("TEST_ENV", "qa"), java.util.Set.of()).isEmpty());
+    }
+
+    @Test
+    void filterOverrides_NullMapAndNullEntriesAreIgnored() {
+        assertTrue(TestExecutionService.filterOverrides(null, java.util.Set.of("a")).isEmpty());
+        Map<String, String> withNull = new java.util.HashMap<>();
+        withNull.put("a", null);
+        withNull.put(null, "x");
+        assertTrue(TestExecutionService.filterOverrides(withNull, java.util.Set.of("a")).isEmpty());
+    }
+
+    @Test
+    void filterOverrides_ComparesExactly_NoPrefixOrCaseMatch() {
+        Map<String, String> result = TestExecutionService.filterOverrides(
+                Map.of("test_env", "x", "TEST_ENV.extra", "y"), java.util.Set.of("TEST_ENV"));
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void parseKeys_TrimsAndSkipsBlanks() {
+        assertEquals(java.util.Set.of("a", "b"), TestExecutionService.parseKeys(" a, ,b ,"));
+        assertTrue(TestExecutionService.parseKeys("").isEmpty());
+        assertTrue(TestExecutionService.parseKeys(null).isEmpty());
+    }
+
+    @Test
+    void queueTestExecution_NotAllowlistedEnvVar_IsNotSetDuringRun() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>("unset");
+        when(cucumberRunnerService.run(anyString(), any(), any())).thenAnswer(inv -> {
+            seen.set(String.valueOf(System.getProperty("apiURL")));
+            return new CucumberRunnerService.RunResult(inv.getArgument(0), "@smoke", 0, "/tmp");
+        });
+        TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
+        request.setEnvironmentVariables(Map.of("apiURL", "https://evil.example"));
+
+        UUID runId = testExecutionService.queueTestExecution(request).getRunId();
+        awaitStatus(runId, RunState.COMPLETED);
+
+        assertEquals("null", seen.get(), "apiURL darf ohne Allowlist-Eintrag nicht gesetzt werden");
+    }
+
+    // --- P4: Szenario-Erkennung (englisch + deutsch) ---
+
+    @Test
+    void isScenarioLine_RecognizesEnglishAndGermanScenarios() {
+        assertTrue(TestExecutionService.isScenarioLine("  Szenario: Erfolgreicher Login"));
+        assertTrue(TestExecutionService.isScenarioLine("Szenariogrundriss: Filter"));
+        assertTrue(TestExecutionService.isScenarioLine("  Beispiel: kurz"));
+        assertTrue(TestExecutionService.isScenarioLine("Scenario: Login"));
+        assertTrue(TestExecutionService.isScenarioLine("Scenario Outline: Filter"));
+    }
+
+    @Test
+    void isScenarioLine_IgnoresExamplesTablesAndOtherLines() {
+        assertFalse(TestExecutionService.isScenarioLine("    Beispiele:"));
+        assertFalse(TestExecutionService.isScenarioLine("    Examples:"));
+        assertFalse(TestExecutionService.isScenarioLine("Funktionalität: Vorgangs-Dashboard"));
+        assertFalse(TestExecutionService.isScenarioLine("  # Szenario: auskommentiert"));
     }
 }

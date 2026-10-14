@@ -48,8 +48,8 @@ spec:
               name: actuator
           env:
             # ---- Integration gegen WireMock ----
-            # dev-Profil setzt integration.mock.enabled=true -> hier überschreiben,
-            # damit echte HTTP-Calls an WireMock gehen (statt simulierter Mock-Werte).
+            # Explizit aus, damit echte HTTP-Calls an WireMock gehen (statt simulierter Mock-Werte),
+            # auch falls jemand SPRING_PROFILES_ACTIVE=dev setzt (das dev-Profil aktiviert den Mock).
             - name: INTEGRATION_MOCK_ENABLED
               value: "false"
             - name: ZEPHYR_ENABLED
@@ -83,7 +83,7 @@ spec:
             # Testziel der @GUI-Szenarien. Der Browser (Sidecar) löst die URL auf, nicht die JVM.
             - name: BASEURL
               value: "http://angular-gui:8080/"
-            # dev-Profil setzt browser.headless=false (lokales Debugging) → im Cluster ohne X-Server überschreiben.
+            # Explizit headless (Default ohne Profil); das dev-Profil würde false setzen → ohne X-Server kein Start.
             - name: BROWSER_HEADLESS
               value: "true"
             # Werden per x-playwright-launch-options an den Sidecar durchgereicht. Nötig, weil die
@@ -108,11 +108,15 @@ spec:
                 -XX:MaxMetaspaceSize=384m -XX:ReservedCodeCacheSize=256m -XX:MaxDirectMemorySize=256m
                 -Xss512k -XX:+UseG1GC -XX:G1PeriodicGCInterval=30000
                 -XX:ParallelGCThreads=2 -XX:ConcGCThreads=1
-                -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/test-results/dumps
+                -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps
                 -XX:NativeMemoryTracking=summary
           volumeMounts:
             - name: test-results
               mountPath: /app/test-results
+            # Heap-Dumps enthalten alle Secrets im Speicher → eigenes Volume, NICHT unter
+            # /app/test-results (das wird per /reports/** ausgeliefert). Abholen: kubectl cp.
+            - name: dumps
+              mountPath: /dumps
           resources:
             requests:
               memory: "2Gi"
@@ -180,6 +184,9 @@ spec:
           persistentVolumeClaim:
             claimName: test-results-pvc
         # Chromium nutzt /dev/shm intensiv; Container-Default (64 Mi) führt zu Tab-Crashes.
+        - name: dumps
+          emptyDir:
+            sizeLimit: 3Gi
         - name: dshm
           emptyDir:
             medium: Memory

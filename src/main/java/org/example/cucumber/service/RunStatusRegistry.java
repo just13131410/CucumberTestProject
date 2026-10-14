@@ -1,6 +1,7 @@
 package org.example.cucumber.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.cucumber.model.RunState;
 import org.example.cucumber.model.TestStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -65,24 +66,36 @@ public class RunStatusRegistry {
 
     public List<TestStatus> getActiveTests() {
         return statusMap.values().stream()
-                .filter(s -> "QUEUED".equals(s.getStatus()) || "RUNNING".equals(s.getStatus()))
+                .filter(s -> s.getStatus() != null && s.getStatus().isActive())
                 .collect(Collectors.toList());
     }
 
-    public void updateStatus(UUID runId, String newStatus, String errorMessage) {
-        TestStatus status = statusMap.get(runId);
-        if (status != null) {
+    /**
+     * Setzt den Status atomar (pro Run). Endzustände sind final: ein per {@code cancel} gesetztes
+     * {@code CANCELLED} darf nicht vom anschließenden Interrupt-Handling als {@code FAILED}
+     * überschrieben werden.
+     *
+     * @return {@code true}, wenn der Status geändert wurde
+     */
+    public boolean updateStatus(UUID runId, RunState newStatus, String errorMessage) {
+        boolean[] changed = {false};
+        statusMap.computeIfPresent(runId, (id, status) -> {
+            if (isTerminal(status.getStatus())) {
+                return status;
+            }
             status.setStatus(newStatus);
             if (errorMessage != null) {
                 status.setErrorMessage(errorMessage);
             }
-        }
+            changed[0] = true;
+            return status;
+        });
+        return changed[0];
     }
 
     /** True für Endzustände, deren Status evictbar ist. */
-    public static boolean isTerminal(String status) {
-        return "COMPLETED".equals(status) || "FAILED".equals(status)
-                || "CANCELLED".equals(status) || "INTERRUPTED".equals(status);
+    public static boolean isTerminal(RunState status) {
+        return status != null && status.isTerminal();
     }
 
     /**
@@ -123,10 +136,10 @@ public class RunStatusRegistry {
                 .toList();
 
         long total = allStatuses.size();
-        long completed = allStatuses.stream().filter(s -> "COMPLETED".equals(s.getStatus())).count();
-        long failed = allStatuses.stream().filter(s -> "FAILED".equals(s.getStatus())).count();
-        long running = allStatuses.stream().filter(s -> "RUNNING".equals(s.getStatus())).count();
-        long queued = allStatuses.stream().filter(s -> "QUEUED".equals(s.getStatus())).count();
+        long completed = allStatuses.stream().filter(s -> s.getStatus() == RunState.COMPLETED).count();
+        long failed = allStatuses.stream().filter(s -> s.getStatus() == RunState.FAILED).count();
+        long running = allStatuses.stream().filter(s -> s.getStatus() == RunState.RUNNING).count();
+        long queued = allStatuses.stream().filter(s -> s.getStatus() == RunState.QUEUED).count();
 
         return new java.util.LinkedHashMap<>(Map.of(
                 "totalRuns", total,

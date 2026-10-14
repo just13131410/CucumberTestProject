@@ -96,25 +96,24 @@ Content-Type: application/json
 | Feld                  | Typ              | Pflicht | Beschreibung                                           |
 |-----------------------|------------------|---------|--------------------------------------------------------|
 | `environment`         | String           | Ja      | Ziel-Umgebung: `dev`, `staging`, `prod`, `performance` |
-| `tags`                | Liste (Strings)  | Ja      | Cucumber-Tags zum Filtern der Tests                    |
-| `features`            | Liste (Strings)  | Nein    | Spezifische Feature-Dateien                            |
-| `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `firefox`, `webkit` |
-| `environmentVariables`| Map              | Nein    | Benutzerdefinierte Umgebungsvariablen                  |
-| `projectKey`          | String           | Nein    | Jira/Zephyr-Projekt-Schlüssel für diesen Lauf (überschreibt `zephyr.default-project-key`) |
-| `zephyrTemplateTestRunKey` | String      | Nein    | Zephyr-Testrun, dessen Testfälle in den neuen Cycle geklont werden (überschreibt `zephyr.template-test-run-key`) - z.B. für einen abweichenden Testfallsatz wie API-Tests |
-| `zephyrResultFolder`  | String           | Nein    | Zephyr-Folder-Pfad für den neuen Cycle (überschreibt `zephyr.result-folder`) |
+| `tags`                | Liste (Strings)  | Ja      | Einfache Cucumber-Tags (`@smoke`, `API-Test`), ODER-verknüpft, max. 20. Tag-Ausdrücke wie `@a and not @b` werden mit 400 abgelehnt |
+| `features`            | Liste (Strings)  | Nein    | Feature-Dateien relativ zu `features/`, optional mit Zeilennummer: `GUIProjectTests.feature`, `API-Test.feature:12`. Keine absoluten Pfade, kein `..`, max. 50 |
+| `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `chrome`, `firefox`, `webkit` |
+| `headless`            | Boolean          | Nein    | Browser ohne Fenster starten (Standard: `true`)        |
+| `environmentVariables`| Map              | Nein    | Laufzeit-Overrides als System-Properties. Übernommen werden **nur** Keys aus `test.execution.allowed-override-keys` (Standard: keine), alle anderen werden ignoriert und geloggt. Max. 20 Einträge |
+| `projectKey`          | String           | Nein    | Jira/Zephyr-Projekt-Schlüssel (`PROJ`, Großbuchstaben) für diesen Lauf (überschreibt `zephyr.default-project-key`) |
+| `zephyrTemplateTestRunKey` | String      | Nein    | Zephyr-Testrun (`PROJ-C15`, `PROJ-R1`), dessen Testfälle in den neuen Cycle geklont werden (überschreibt `zephyr.template-test-run-key`) - z.B. für einen abweichenden Testfallsatz wie API-Tests |
+| `zephyrResultFolder`  | String           | Nein    | Zephyr-Folder-Pfad für den neuen Cycle (überschreibt `zephyr.result-folder`), max. 255 Zeichen |
 
-Folgende Felder werden aktuell im Request-Body akzeptiert (für zukünftige Erweiterungen reserviert), aber vom Service **nicht ausgewertet** - sie haben derzeit keine Auswirkung auf die Ausführung:
+Die früher reservierten, nie ausgewerteten Felder `parallelCount`, `retryFailedTests`, `maxRetries`,
+`timeoutMinutes`, `webhookUrl`, `priority` und `initiator` wurden entfernt. Schicken Clients sie noch
+mit, werden sie ohne Fehler ignoriert.
 
-| Feld                  | Typ              | Beschreibung                                           |
-|-----------------------|------------------|---------------------------------------------------------|
-| `parallelCount`       | Integer          | Anzahl paralleler Threads (Standard: 5)                |
-| `retryFailedTests`    | Boolean          | Fehlgeschlagene Tests wiederholen (Standard: true)     |
-| `maxRetries`          | Integer          | Max. Wiederholungsversuche (Standard: 2)               |
-| `timeoutMinutes`      | Integer          | Timeout in Minuten (Standard: 30)                      |
-| `webhookUrl`          | String           | URL für Ergebnis-Benachrichtigung                     |
-| `priority`            | String           | `LOW`, `NORMAL`, `HIGH`, `CRITICAL` (Standard: NORMAL) |
-| `initiator`           | String           | Wer den Test auslöst (z.B. Pipeline-Name)             |
+**Warum `environmentVariables` eine Allowlist hat:** Der Service liest Konfiguration zur Laufzeit auch
+aus System-Properties. Ohne Allowlist könnte ein Aufrufer z.B. `apiURL` umbiegen (der API-Token ginge
+an einen fremden Server) oder Browser-Downloads auf eine fremde Quelle lenken. Zugangsdaten gehören
+nie in den Request, sondern in Secrets/Vault. Freigabe einzelner Keys pro Deployment:
+`TEST_EXECUTION_ALLOWED_OVERRIDE_KEYS=baseUrl,todoApiUrl`.
 
 **Beispiel - Smoke Tests starten:**
 ```bash
@@ -126,14 +125,14 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   }'
 ```
 
-**Beispiel - API-Tests mit Optionen:**
+**Beispiel - nur bestimmte Feature-Dateien:**
 ```bash
 curl -X POST http://localhost:8080/api/v1/test/execute \
   -H "Content-Type: application/json" \
   -d '{
     "environment": "staging",
     "tags": ["@API-Test"],
-    "environmentVariables": {"API_TOKEN": "..."}
+    "features": ["API-Test.feature", "Todo-API-Test.feature"]
   }'
 ```
 
@@ -165,12 +164,13 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   -d '{
     "environment": "dev",
     "tags": ["@End2End"],
-    "browser": "firefox",
-    "environmentVariables": {
-      "BASE_URL": "https://meine-app.example.com"
-    }
+    "browser": "firefox"
   }'
 ```
+
+Die Ziel-URL der UI-Tests (`baseUrl`) wird pro Deployment gesetzt (Umgebungsvariable `BASEURL`).
+Soll sie pro Lauf änderbar sein, `baseUrl` in `test.execution.allowed-override-keys` freigeben und
+`"environmentVariables": {"baseUrl": "https://meine-app.example.com/"}` mitschicken.
 
 **Response (202 Accepted):**
 ```json
@@ -189,8 +189,8 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
 
 | Code | Bedeutung                                      |
 |------|-------------------------------------------------|
-| 400  | Ungültige Parameter (z.B. fehlende Tags)       |
-| 429  | Maximale Anzahl gleichzeitiger Läufe erreicht  |
+| 400  | Ungültige Parameter (z.B. fehlende Tags, Tag-Ausdruck, ungültiger Feature-Pfad oder Zephyr-Key) |
+| 429  | Kapazität erschöpft: ein Lauf aktiv und Warteschlange voll |
 | 500  | Interner Serverfehler                           |
 
 ---
@@ -328,8 +328,10 @@ curl -X POST http://localhost:8080/api/v1/test/report/550e8400-e29b-41d4-a716-44
 
 **Hinweise:**
 - Der Report wird als statische HTML-Seite generiert und unter `/reports/{runId}/allure-report/` bereitgestellt
+- Unter `/reports/` werden nur die fertigen Report-Ordner ausgeliefert (`allure-report`, `cucumber-reports`, `axe-result`, `screenshots` je Run sowie `combined/allure-report`). Rohdaten (`allure-results`), `status.json`, die Integrations-Outbox und Logs liefern `404`
 - Die `reportUrl` kann direkt im Browser geöffnet werden
-- **Voraussetzung:** Allure CLI muss auf dem Server installiert sein
+- Der Report wird über die Allure-Java-API erzeugt, eine Allure CLI ist nicht nötig
+- Es läuft immer nur eine Erzeugung gleichzeitig; ein zweiter Aufruf währenddessen erhält `429`
 - Die Report-Generierung dauert je nach Testumfang 5-30 Sekunden
 
 **Enthaltene Anhänge im Allure-Report:**
@@ -546,7 +548,8 @@ curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
 
 **Hinweise:**
 - Ohne Request-Body oder mit leerer `runIds`-Liste werden alle verfügbaren Runs kombiniert
-- **Voraussetzung:** Allure CLI muss auf dem Server installiert sein
+- Der Report wird über die Allure-Java-API erzeugt, eine Allure CLI ist nicht nötig
+- Es läuft immer nur eine Erzeugung gleichzeitig; ein zweiter Aufruf währenddessen erhält `429`
 - Der Report ist sofort unter der zurückgegebenen URL im Browser aufrufbar
 - Bei erneuter Generierung wird der vorherige kombinierte Report überschrieben
 - Nützlich für Sprint-Reports oder teamübergreifende Auswertungen
@@ -557,7 +560,8 @@ curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
 
 | Code | Bedeutung                                      |
 |------|-------------------------------------------------|
-| 404  | Keine Runs gefunden oder Allure CLI nicht verfügbar |
+| 404  | Keine Runs mit Allure-Ergebnissen gefunden          |
+| 429  | Es wird bereits ein kombinierter Report erzeugt     |
 | 500  | Fehler bei Report-Generierung                  |
 
 ---
@@ -678,12 +682,13 @@ Falls alle 5 Slots belegt sind, werden weitere Anfragen in eine Warteschlange ge
 | `@T-3513`     | Einzelner Testfall (nach ID)          |
 | `@T-3514`     | Einzelner Testfall (nach ID)          |
 
-Tags können kombiniert werden:
+Mehrere Tags werden ODER-verknüpft (`@smoke or @API-Test`):
 ```json
 {
   "tags": ["@smoke", "@API-Test"]
 }
 ```
+Tag-Ausdrücke mit `and`, `not` oder Klammern werden abgelehnt (400).
 
 ---
 
@@ -694,7 +699,7 @@ Tags können kombiniert werden:
 | `400 Bad Request`                          | Request-Body prüfen: `environment` und `tags` sind Pflicht    |
 | `404 Not Found`                            | Run-ID prüfen - ist sie korrekt?                              |
 | `429 Too Many Requests`                    | Warten bis laufende Tests abgeschlossen sind                   |
-| Status bleibt auf `QUEUED`                 | Alle 5 Slots belegt - mit `GET /active` aktive Tests prüfen   |
+| Status bleibt auf `QUEUED`                 | Es läuft immer nur ein Lauf gleichzeitig, weitere warten (max. 20) - mit `GET /active` prüfen |
 | Report leer oder nicht vorhanden           | Test muss erst abgeschlossen sein (Status: COMPLETED/FAILED)   |
 | UI-Tests schlagen fehl                     | Browser prüfen (`chromium` ist Standard im Container)         |
 | Keine Screenshots im Allure-Report         | Screenshots werden nur bei UI-Tests (`@End2End`, `@smoke`) erstellt, nicht bei `@API-Test` |

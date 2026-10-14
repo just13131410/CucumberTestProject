@@ -25,7 +25,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -43,6 +45,10 @@ public class AllureReportService {
     private static final DateTimeFormatter RUN_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** Ein Lock pro Run für {@link #generateAllureReport}; wird nach Gebrauch wieder entfernt. */
+    private final ConcurrentHashMap<UUID, ReentrantLock> runLocks = new ConcurrentHashMap<>();
+    private final ReentrantLock combinedLock = new ReentrantLock();
     /** Dedizierter Single-Thread-Executor für die CPU-/Native-lastige Allure-Report-Generierung. */
     private final ExecutorService reportExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "allure-report-generator");
@@ -75,20 +81,33 @@ public class AllureReportService {
         }
     }
 
-    public Optional<Object> getTestReport(UUID runId) {
+    /**
+     * Pfad zum Cucumber-JSON eines Runs. Der Controller streamt die Datei, statt sie (bei großen
+     * Läufen mehrere MB) komplett in einen String zu laden.
+     */
+    public Optional<Path> getTestReport(UUID runId) {
         Path reportPath = getResultsPath(runId).resolve("cucumber-reports").resolve("Cucumber.json");
-        if (Files.exists(reportPath)) {
-            try {
-                String json = Files.readString(reportPath);
-                return Optional.of(json);
-            } catch (IOException e) {
-                log.error("Failed to read report for runId={}", runId, e);
-            }
-        }
-        return Optional.empty();
+        return Files.isRegularFile(reportPath) ? Optional.of(reportPath) : Optional.empty();
     }
 
+    /**
+     * Erzeugt den Allure-Report eines Runs. Pro Run serialisiert: der asynchrone Aufruf nach dem
+     * Lauf und manuelle {@code /generate}-Aufrufe schreiben sonst gleichzeitig in dasselbe Verzeichnis.
+     */
     public Optional<String> generateAllureReport(UUID runId) {
+        ReentrantLock lock = runLocks.computeIfAbsent(runId, id -> new ReentrantLock());
+        lock.lock();
+        try {
+            return doGenerateAllureReport(runId);
+        } finally {
+            lock.unlock();
+            if (!lock.hasQueuedThreads()) {
+                runLocks.remove(runId, lock);
+            }
+        }
+    }
+
+    private Optional<String> doGenerateAllureReport(UUID runId) {
         Path allureResultsDir = getResultsPath(runId).resolve("allure-results");
         Path allureReportDir = getResultsPath(runId).resolve("allure-report");
 
@@ -195,7 +214,24 @@ public class AllureReportService {
         }
     }
 
+    /**
+     * Erzeugt den kombinierten Report über mehrere Runs. Nur eine Erzeugung gleichzeitig: sie kopiert
+     * alle Ergebnisse und ist CPU-/IO-lastig, parallele Aufrufe würden zudem dasselbe Zielverzeichnis
+     * beschreiben. Ein zweiter Aufruf während einer laufenden Erzeugung wird mit
+     * {@link CapacityExceededException} (HTTP 429) abgelehnt.
+     */
     public Optional<String> generateCombinedAllureReport(List<UUID> runIds) {
+        if (!combinedLock.tryLock()) {
+            throw new CapacityExceededException("Kombinierter Report wird bereits erzeugt, bitte später erneut versuchen");
+        }
+        try {
+            return doGenerateCombinedAllureReport(runIds);
+        } finally {
+            combinedLock.unlock();
+        }
+    }
+
+    private Optional<String> doGenerateCombinedAllureReport(List<UUID> runIds) {
         List<UUID> effectiveRunIds = (runIds == null || runIds.isEmpty())
                 ? listAvailableRuns()
                 : runIds;

@@ -114,4 +114,75 @@ class AxeReportHookTest {
         assertNotNull(result);
         assertTrue(result.toString().contains("axe"));
     }
+
+    // --- P2: inkrementelle Zusammenfassung statt Neu-Parsen aller JSONs ---
+
+    private static com.fasterxml.jackson.databind.JsonNode json(String text) throws Exception {
+        return new com.fasterxml.jackson.databind.ObjectMapper().readTree(text);
+    }
+
+    @Test
+    void summarize_CountsPassesViolationsAndImpacts() throws Exception {
+        var root = json("""
+                {"url":"http://angular-gui:8080/login",
+                 "passes":[{},{},{}],
+                 "violations":[{"impact":"critical"},{"impact":"serious"},{"impact":"serious"},{"impact":"minor"},{"impact":null}]}
+                """);
+
+        AxeReportHook.ScanSummary s = AxeReportHook.summarize(root, "Login-audit-1791530279164_1791530279628", "x.html");
+
+        assertEquals("http://angular-gui:8080/login", s.url);
+        assertEquals(3, s.passes);
+        assertEquals(5, s.violations);
+        assertEquals(1, s.critical);
+        assertEquals(2, s.serious);
+        assertEquals(0, s.moderate);
+        assertEquals(1, s.minor);
+        assertEquals("x.html", s.htmlFile);
+        assertFalse(s.title.matches(".*\\d{10,}.*"), "Zeitstempel nicht im Titel: " + s.title);
+    }
+
+    @Test
+    void summarize_MissingFields_DefaultsToZero() throws Exception {
+        AxeReportHook.ScanSummary s = AxeReportHook.summarize(json("{}"), "Leer", null);
+
+        assertEquals("", s.url);
+        assertEquals(0, s.passes);
+        assertEquals(0, s.violations);
+        assertNull(s.htmlFile);
+    }
+
+    @Test
+    void generateIndexHtml_WritesTotalsEscapedUrlsAndNoTempFiles(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        AxeReportHook.ScanSummary a = AxeReportHook.summarize(
+                json("{\"url\":\"http://x/<script>\",\"violations\":[{\"impact\":\"critical\"}]}"), "A", "A.html");
+        AxeReportHook.ScanSummary b = AxeReportHook.summarize(
+                json("{\"url\":\"http://y\",\"violations\":[{\"impact\":\"minor\"},{\"impact\":\"minor\"}]}"), "B", "B.html");
+
+        AxeReportHook.generateIndexHtml(dir, java.util.List.of(a, b));
+
+        String html = java.nio.file.Files.readString(dir.resolve("index.html"));
+        assertTrue(html.contains("A.html") && html.contains("B.html"));
+        assertTrue(html.contains("http://x/&lt;script&gt;"), "URL wird HTML-escaped");
+        assertFalse(html.contains("<script>"));
+        try (var files = java.nio.file.Files.list(dir)) {
+            assertEquals(1, files.count(), "Nur index.html, keine .tmp-Reste");
+        }
+    }
+
+    @Test
+    void forgetRun_RemovesRunState() throws Exception {
+        Path dir = Path.of("target", "axe-forget-" + java.util.UUID.randomUUID());
+        java.lang.reflect.Field runsField = AxeReportHook.class.getDeclaredField("runs");
+        runsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var runs = (java.util.Map<String, AxeReportHook.RunScans>) runsField.get(null);
+        runs.put(dir.toAbsolutePath().toString(), new AxeReportHook.RunScans());
+        int before = AxeReportHook.trackedRuns();
+
+        AxeReportHook.forgetRun(dir);
+
+        assertEquals(before - 1, AxeReportHook.trackedRuns());
+        assertFalse(runs.containsKey(dir.toAbsolutePath().toString()));
+    }
 }

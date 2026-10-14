@@ -10,6 +10,8 @@ import java.nio.file.Paths;
 
 public class TakeScreenshots {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TakeScreenshots.class);
+
     /**
      * Erstellt einen Screenshot und haengt ihn via Cucumber Scenario an den Allure-Report an.
      * scenario.attach() geht durch den Cucumber-Eventbus, den AllureCucumber7Jvm direkt
@@ -32,7 +34,7 @@ public class TakeScreenshots {
             // An Allure-Report anhaengen via Cucumber-Eventbus
             scenario.attach(screenshot, "image/png", "Screenshot - " + name);
         } catch (Exception e) {
-            System.err.println("Fehler beim Erstellen des Screenshots: " + e.getMessage());
+            log.warn("Fehler beim Erstellen des Screenshots {}: {}", name, e.getMessage());
         }
     }
 

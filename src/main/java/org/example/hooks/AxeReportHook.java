@@ -7,37 +7,56 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.microsoft.playwright.Page;
 import io.qameta.allure.Allure;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.example.cucumber.context.TestContext;
 import org.example.utils.ConfigReader;
 
 import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
+import java.util.NavigableMap;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 
 public class AxeReportHook {
+    private static final Logger log = LoggerFactory.getLogger(AxeReportHook.class);
+
     private static final ObjectMapper mapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
 
     /**
-     * Tracks already-scanned URLs per output directory (= per run).
-     * Key: absolute path of the axe result directory (unique per run).
-     * Value: set of page URLs already scanned in that run.
-     * Prevents duplicate axe scans when multiple scenarios visit the same page.
+     * Zustand pro Run (Key: absoluter Pfad des Axe-Ergebnisverzeichnisses, eindeutig pro Run).
+     * Bewusst statisch, weil die Step-Definitionen den Hook statisch aufrufen; der Eintrag wird am
+     * Laufende per {@link #forgetRun(Path)} entfernt, damit die Map im Dauerbetrieb nicht wächst.
      */
-    private static final ConcurrentHashMap<String, Set<String>> scannedUrlsByRun =
-            new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, RunScans> runs = new ConcurrentHashMap<>();
+
+    /** Bereits gescannte URLs (verhindert doppelte Scans) und Zusammenfassungen für die index.html. */
+    static final class RunScans {
+        final Set<String> scannedUrls = ConcurrentHashMap.newKeySet();
+        /** Sortiert nach Dateiname, wie zuvor die Dateiliste; Zugriff nur unter {@code synchronized (this)}. */
+        final NavigableMap<String, ScanSummary> summaries = new TreeMap<>();
+    }
+
+    /** Entfernt den Zustand eines Runs; Aufruf am Laufende (CucumberInvoker). */
+    public static void forgetRun(Path reportDir) {
+        runs.remove(reportDir.toAbsolutePath().toString());
+    }
+
+    /** Anzahl der Runs mit gehaltenem Zustand (für Tests). */
+    static int trackedRuns() {
+        return runs.size();
+    }
 
     /**
      * Gemeinsames Basis-CSS für {@link #generateIndexHtml} und {@link #generateSimpleHtml}
@@ -118,9 +137,9 @@ public class AxeReportHook {
         String runKey  = reportDir.toAbsolutePath().toString();
         String pageUrl = page.url();
 
-        Set<String> scanned = scannedUrlsByRun.computeIfAbsent(runKey, k -> ConcurrentHashMap.newKeySet());
-        if (!scanned.add(pageUrl)) {
-            System.out.println("Axe-Scan uebersprungen (URL bereits gescannt in diesem Run): " + pageUrl);
+        RunScans run = runs.computeIfAbsent(runKey, k -> new RunScans());
+        if (!run.scannedUrls.add(pageUrl)) {
+            log.info("Axe-Scan übersprungen (URL bereits gescannt in diesem Run): {}", pageUrl);
             return;
         }
 
@@ -134,12 +153,19 @@ public class AxeReportHook {
             // Stabile Benennung: JSON und HTML teilen sich den gleichen Basisnamen
             String baseName = fileName + "_" + System.currentTimeMillis();
 
-            mapper.writeValue(new File(reportDir.resolve(baseName + ".json").toString()), results);
+            // Einmal serialisieren und für Datei, Index-Zusammenfassung und Allure-Anhang wiederverwenden
             String jsonString = mapper.writeValueAsString(results);
-            System.out.println("Axe-Report generiert: " + baseName + ".json");
+            Files.writeString(reportDir.resolve(baseName + ".json"), jsonString);
+            log.info("Axe-Report generiert: {}.json", baseName);
 
             generateSimpleHtml(results, baseName, reportDir);
-            generateIndexHtml(reportDir);
+
+            // Inkrementell statt bei jedem Scan alle bisherigen JSON-Dateien neu zu parsen
+            ScanSummary summary = summarize(mapper.readTree(jsonString), baseName, baseName + ".html");
+            synchronized (run) {
+                run.summaries.put(baseName, summary);
+                generateIndexHtml(reportDir, new ArrayList<>(run.summaries.values()));
+            }
 
             Allure.addAttachment(
                     "Accessibility Scan - " + fileName,
@@ -148,7 +174,7 @@ public class AxeReportHook {
                     ".json"
             );
         } catch (IOException e) {
-            System.err.println("Fehler beim Schreiben des JSON-Reports: " + e.getMessage());
+            log.error("Fehler beim Schreiben des Axe-Reports {}: {}", fileName, e.getMessage());
         }
     }
 
@@ -157,11 +183,10 @@ public class AxeReportHook {
     // ───────────────────────────────────────────────
 
     /**
-     * Liest alle JSON-Dateien im Report-Verzeichnis ein und erzeugt eine
-     * index.html mit Gesamtstatistik und Verlinkung zu den Einzelberichten.
+     * Erzeugt die index.html mit Gesamtstatistik und Verlinkung zu den Einzelberichten.
+     * Atomar ersetzt, damit ein paralleler Leser nie eine halb geschriebene Seite sieht.
      */
-    static void generateIndexHtml(Path reportDir) throws IOException {
-        List<ScanSummary> scans = collectScans(reportDir);
+    static void generateIndexHtml(Path reportDir, List<ScanSummary> scans) throws IOException {
 
         int totalViolations = scans.stream().mapToInt(s -> s.violations).sum();
         int totalPasses = scans.stream().mapToInt(s -> s.passes).sum();
@@ -335,66 +360,43 @@ public class AxeReportHook {
             </html>
             """);
 
-        Files.writeString(reportDir.resolve("index.html"), html.toString());
+        Path tmp = Files.createTempFile(reportDir, "index", ".html.tmp");
+        try {
+            Files.writeString(tmp, html.toString());
+            Files.move(tmp, reportDir.resolve("index.html"), StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     /**
-     * Liest alle JSON-Dateien im Verzeichnis und extrahiert die Zusammenfassungsdaten.
+     * Extrahiert die Kennzahlen eines Scans aus seinem JSON (Ergebnis von {@code AxeBuilder.analyze()}).
+     *
+     * @param rawName  Basisname der Report-Dateien (für den Titel)
+     * @param htmlFile Dateiname des Einzelberichts oder {@code null}
      */
-    private static List<ScanSummary> collectScans(Path reportDir) {
-        List<ScanSummary> scans = new ArrayList<>();
+    static ScanSummary summarize(JsonNode root, String rawName, String htmlFile) {
+        ScanSummary s = new ScanSummary();
+        s.title = beautifyTitle(rawName);
+        s.url = root.has("url") ? root.get("url").asText("") : "";
+        s.passes = root.has("passes") ? root.get("passes").size() : 0;
+        s.violations = root.has("violations") ? root.get("violations").size() : 0;
 
-        try (Stream<Path> files = Files.list(reportDir)) {
-            List<Path> jsonFiles = files
-                    .filter(p -> p.toString().endsWith(".json"))
-                    .sorted(Comparator.comparing(p -> p.getFileName().toString()))
-                    .toList();
-
-            for (Path jsonFile : jsonFiles) {
-                try {
-                    JsonNode root = mapper.readTree(jsonFile.toFile());
-                    ScanSummary s = new ScanSummary();
-
-                    // Titel aus Dateiname ableiten (z.B. "LoginSuccessfully-audit1234567890_1707812345678")
-                    String rawName = jsonFile.getFileName().toString().replace(".json", "");
-                    s.title = beautifyTitle(rawName);
-
-                    // URL der geprueften Seite
-                    s.url = root.has("url") ? root.get("url").asText("") : "";
-
-                    // Statistiken
-                    s.passes = root.has("passes") ? root.get("passes").size() : 0;
-                    s.violations = root.has("violations") ? root.get("violations").size() : 0;
-
-                    JsonNode violations = root.get("violations");
-                    if (violations != null && violations.isArray()) {
-                        for (JsonNode v : violations) {
-                            String impact = v.has("impact") ? v.get("impact").asText("") : "";
-                            switch (impact) {
-                                case "critical" -> s.critical++;
-                                case "serious" -> s.serious++;
-                                case "moderate" -> s.moderate++;
-                                case "minor" -> s.minor++;
-                            }
-                        }
-                    }
-
-                    // Passenden HTML-Einzelbericht suchen
-                    String htmlName = rawName + ".html";
-                    if (Files.exists(reportDir.resolve(htmlName))) {
-                        s.htmlFile = htmlName;
-                    }
-
-                    scans.add(s);
-                } catch (IOException e) {
-                    System.err.println("Fehler beim Lesen von " + jsonFile.getFileName() + ": " + e.getMessage());
+        JsonNode violations = root.get("violations");
+        if (violations != null && violations.isArray()) {
+            for (JsonNode v : violations) {
+                String impact = v.has("impact") ? v.get("impact").asText("") : "";
+                switch (impact) {
+                    case "critical" -> s.critical++;
+                    case "serious" -> s.serious++;
+                    case "moderate" -> s.moderate++;
+                    case "minor" -> s.minor++;
+                    default -> { }
                 }
             }
-        } catch (IOException e) {
-            System.err.println("Fehler beim Auflisten der Axe-Reports: " + e.getMessage());
         }
-
-        return scans;
+        s.htmlFile = htmlFile;
+        return s;
     }
 
     /**
@@ -421,7 +423,7 @@ public class AxeReportHook {
         return name.isEmpty() ? "Barrierefreiheits-Scan" : name;
     }
 
-    private static class ScanSummary {
+    static final class ScanSummary {
         String title = "";
         String url = "";
         int passes;

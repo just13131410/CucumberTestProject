@@ -47,6 +47,20 @@ data:
         "jsonBody": [ { "id": 1, "testResultStatus": "Pass" } ]
       }
     }
+  # POST /rest/atm/1.0/testrun/{key}/attachments (multipart, Feld "file") → Report-Anhang am Cycle
+  testrun-attachment-post.json: |
+    {
+      "request": {
+        "method": "POST",
+        "urlPathPattern": "/rest/atm/1.0/testrun/[^/]+/attachments",
+        "headers": { "Content-Type": { "contains": "multipart/form-data" } }
+      },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "id": 5001 }
+      }
+    }
   # POST /rest/api/2/issue → angelegtes Jira-Ticket
   jira-issue-post.json: |
     {

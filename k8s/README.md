@@ -99,7 +99,8 @@ curl -s http://localhost:8080/api/v1/test/<runId>
 **Erwartetes Ergebnis**
 - WireMock-Journal (`/__admin/requests`) zeigt die vom Client gesendeten Calls:
   `GET /rest/atm/1.0/folder`, `POST /rest/atm/1.0/folder`, `POST /rest/atm/1.0/testrun`,
-  `POST /rest/atm/1.0/testrun/QA-C1/testresults` und bei Fehl-Runs `POST /rest/api/2/issue`
+  `POST /rest/atm/1.0/testrun/QA-C1/testresults`, `POST /rest/atm/1.0/testrun/QA-C1/attachments`
+  (Cucumber- + Axe-Report, multipart) und bei Fehl-Runs `POST /rest/api/2/issue`
   — jeweils mit JSON-Body.
 - Im Status-JSON der App: `metadata.zephyrCycleKey = QA-C1`, bei Fehlern `jiraTicketKey = QA-1`.
 
@@ -108,6 +109,57 @@ Schnellcheck der empfangenen Calls:
 curl -s http://localhost:8081/__admin/requests | jq '.requests[].request.url'
 ```
 
+## 6. GUI-Tests mit Remote-Browser (Playwright-Sidecar)
+
+Der Java-Container startet keinen Browser. Im App-Pod läuft als zweiter Container das
+offizielle Playwright-Node-Image (`k8s/playwright-server/Dockerfile`, `playwright run-server`
+auf `127.0.0.1:3000`); die App verbindet sich per `PLAYWRIGHT_MODE=remote`
+(+ `PLAYWRIGHT_REMOTE_ENDPOINT=ws://localhost:3000/`, ist auch der Default).
+
+| `PLAYWRIGHT_MODE` | Browser läuft … | typischer Einsatz |
+|---|---|---|
+| `local` (Default) | in der App selbst (Mirror bzw. `browser.executable.path`) | lokale Entwicklung, `localhost:4200` |
+| `remote` | im Playwright-Server (Sidecar) | Cluster mit restriktiven NetworkPolicies |
+Testziel ist das Angular-Dashboard als nginx-Deployment (`40-angular-gui.yaml`,
+`BASEURL=http://angular-gui:8080/`).
+
+Images direkt in den k3s-Store bauen (`nerdctl -n k8s.io` erreicht ihn von Windows aus –
+kein save/import nötig):
+```bash
+# Angular bauen und Kontext vorbereiten
+(cd /f/Dokumente/Dev/GUIProjekt/guiprojekt && npx ng build)
+GD="$TEMP/gui-imgbuild"; mkdir -p "$GD"
+cp k8s/angular-gui/Dockerfile k8s/angular-gui/nginx.conf "$GD/"
+cp -r /f/Dokumente/Dev/GUIProjekt/guiprojekt/dist/guiprojekt/browser "$GD/"
+nerdctl -n k8s.io build -t angular-gui:latest "$GD"
+
+# Playwright-Server (Version = Maven-Dependency playwright im pom.xml!)
+nerdctl -n k8s.io build -t playwright-server:1.58.0 k8s/playwright-server
+
+kubectl apply -f k8s/40-angular-gui.yaml -f k8s/20-app.yaml
+```
+GUI-Lauf triggern:
+```bash
+curl -s -X POST http://localhost:8080/api/v1/test/execute -H 'Content-Type: application/json'   -d '{"environment":"dev","tags":["@GUI"]}'
+```
+Im Manifest gesetzt (alle per `x-playwright-launch-options` an den Server durchgereicht):
+`BROWSER_HEADLESS=true` (das dev-Profil setzt sonst `false` → kein X-Server), sowie
+`PLAYWRIGHT_REMOTE_CHANNEL=chromium` + `BROWSER_EXTRA_ARGS=--unsafely-treat-insecure-origin-as-secure=http://angular-gui:8080`:
+Die Angular-App nutzt `crypto.randomUUID()`, das es nur im Secure Context (HTTPS/localhost) gibt.
+Das Flag wirkt nur im vollen Chromium, nicht in der Headless-Shell. Bei HTTPS-Zielen entfällt beides.
+
+**Sidecar-Probes:** `startupProbe` + `livenessProbe` als `exec` (`node -e` → `GET http://127.0.0.1:3000/`
+liefert `200 "Running"`), weil der Server nur auf localhost lauscht. Ein hängender Server wird nach
+~60 s neu gestartet – nur der Sidecar, nicht die App. Bewusst **keine** readinessProbe: sonst fiele
+der ganze Pod aus dem Service und blockierte auch API-Tests.
+
+> **Verifiziert am 09.10.2026:** Liveness-Restart per `kill -STOP` auf den Server-Prozess geprüft; Zephyr-Attachments → 201. Modus `local` (App auf dem Host, `localhost:4200`) ebenfalls 18/18. `@GUI` → 18/18 Szenarien grün, Screenshots + Axe-Reports im App-Container.
+
+Firmen-Setup: Das Playwright-Image einmalig in die interne Registry spiegeln/bauen – zur
+Laufzeit braucht der Sidecar keinen Internetzugang. NetworkPolicies wirken pro **Pod**: Der Pod
+braucht Egress zum Testziel (`BASEURL`), App↔Sidecar über localhost ist davon nicht betroffen.
+OpenShift/ArgoCD-Nachbau: `docs/OpenShift-ArgoCD-Remote-Browser.md`.
+
 ## Bausteine
 
 | Datei | Inhalt |
@@ -115,7 +167,11 @@ curl -s http://localhost:8081/__admin/requests | jq '.requests[].request.url'
 | `00-namespace.yaml` | Namespace `test-automation` |
 | `10-wiremock-mappings.yaml` | Stub-Mappings (ATM v1 + Jira v2) als ConfigMap |
 | `11-wiremock.yaml` | WireMock Deployment + Service + Ingress |
-| `20-app.yaml` | cucumber-test-service Deployment + Service + Ingress (Integration → WireMock) |
+| `20-app.yaml` | cucumber-test-service Deployment (+ Playwright-Sidecar) + Service + Ingress (Integration → WireMock) |
+| `30-todo-api.yaml` | Todo-API-Fixture für die @API-Test-Szenarien |
+| `40-angular-gui.yaml` | Angular-Dashboard (nginx) als Testziel der @GUI-Szenarien |
+| `playwright-server/Dockerfile` | Offizielles Playwright-Node-Image + `playwright run-server` (Sidecar) |
+| `angular-gui/` | Dockerfile + nginx.conf (SPA-Fallback) für das Angular-Dashboard |
 
 ## Ausblick: eigene GUI (später)
 Geplant als eigenes Ergebnis-Dashboard, das das WireMock-Journal ausliest und die

@@ -134,6 +134,9 @@ class TestExecutionRequestTest {
         assertNull(request.getEnvironmentVariables());
         assertNull(request.getWebhookUrl());
         assertNull(request.getInitiator());
+        assertNull(request.getProjectKey());
+        assertNull(request.getZephyrTemplateTestRunKey());
+        assertNull(request.getZephyrResultFolder());
     }
 
     @Test

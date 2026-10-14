@@ -31,9 +31,14 @@ public abstract class AbstractAtlassianClient {
     }
 
     protected HttpHeaders buildHeaders() {
+        return buildHeaders(MediaType.APPLICATION_JSON);
+    }
+
+    /** Ueberladung fuer Requests mit abweichendem Content-Type (z.B. Multipart-Attachment-Upload). */
+    protected HttpHeaders buildHeaders(MediaType contentType) {
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.AUTHORIZATION, authHeader);
-        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setContentType(contentType);
         return headers;
     }
 }

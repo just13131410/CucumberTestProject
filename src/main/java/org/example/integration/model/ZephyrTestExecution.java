@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -18,4 +20,6 @@ public class ZephyrTestExecution {
     private String testCaseKey;
     private String status;
     private String comment;
+    /** Schritt-fuer-Schritt-Status, korrespondiert zu den Skript-Schritten des Zephyr-Testfalls. */
+    private List<ZephyrScriptResult> scriptResults;
 }

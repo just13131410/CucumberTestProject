@@ -40,12 +40,17 @@ public class PlaywrightBrowserInstaller {
 
     /**
      * Stellt sicher, dass der angegebene Browser über den Mirror installiert ist.
-     * Idempotent und thread-safe; im Nicht-Mirror-Modus ein No-Op.
+     * Idempotent und thread-safe; im Remote- und Nicht-Mirror-Modus ein No-Op.
      *
      * @param browser Browser-Bezeichnung (z.B. {@code chromium}, {@code firefox}, {@code webkit});
      *                {@code null} → {@code chromium}
      */
     public synchronized void ensureInstalled(String browser) {
+        if (PlaywrightRemoteConfig.isRemoteEnabled()) {
+            log.debug("playwright.mode=remote ({}) – überspringe Browser-Installation.",
+                    PlaywrightRemoteConfig.endpoint());
+            return;
+        }
         if (!PlaywrightMirrorConfig.isMirrorEnabled()) {
             log.debug("Playwright-Mirror deaktiviert – überspringe Browser-Installation.");
             return;

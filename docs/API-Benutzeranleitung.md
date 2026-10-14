@@ -100,6 +100,9 @@ Content-Type: application/json
 | `features`            | Liste (Strings)  | Nein    | Spezifische Feature-Dateien                            |
 | `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `firefox`, `webkit` |
 | `environmentVariables`| Map              | Nein    | Benutzerdefinierte Umgebungsvariablen                  |
+| `projectKey`          | String           | Nein    | Jira/Zephyr-Projekt-Schlüssel für diesen Lauf (überschreibt `zephyr.default-project-key`) |
+| `zephyrTemplateTestRunKey` | String      | Nein    | Zephyr-Testrun, dessen Testfälle in den neuen Cycle geklont werden (überschreibt `zephyr.template-test-run-key`) - z.B. für einen abweichenden Testfallsatz wie API-Tests |
+| `zephyrResultFolder`  | String           | Nein    | Zephyr-Folder-Pfad für den neuen Cycle (überschreibt `zephyr.result-folder`) |
 
 Folgende Felder werden aktuell im Request-Body akzeptiert (für zukünftige Erweiterungen reserviert), aber vom Service **nicht ausgewertet** - sie haben derzeit keine Auswirkung auf die Ausführung:
 
@@ -131,6 +134,27 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
     "environment": "staging",
     "tags": ["@API-Test"],
     "environmentVariables": {"API_TOKEN": "..."}
+  }'
+```
+
+**Beispiel - API-Tests mit eigenem Zephyr-Testfallsatz:**
+
+Frontend-Tests (z.B. `@SmokeTest`) klonen standardmäßig aus dem global konfigurierten
+`zephyr.template-test-run-key` (z.B. `PROJ-C8`). Für API-Tests mit einem eigenen, davon
+unabhängigen Testfallsatz muss der Cycle stattdessen aus einem Zephyr-Testrun geklont werden,
+der die API-Testfälle als Items enthält - sonst schlägt der Ergebnis-Upload mit `400`
+fehl ("Testfall nicht im Testrun gefunden"). Dazu `zephyrTemplateTestRunKey` (und optional
+`zephyrResultFolder`) explizit im Request setzen:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/test/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "environment": "staging",
+    "tags": ["@API-Test"],
+    "projectKey": "PROJ",
+    "zephyrTemplateTestRunKey": "PROJ-C15",
+    "zephyrResultFolder": "/Testautomation/API"
   }'
 ```
 

@@ -8,12 +8,14 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class PlaywrightBrowserInstallerTest {
 
     @AfterEach
     void clearProps() {
         System.clearProperty("playwright.mirror.enabled");
+        System.clearProperty("playwright.mode");
     }
 
     /** Test-Installer, der den echten Download-Subprozess durch einen Recorder ersetzt. */
@@ -69,6 +71,16 @@ class PlaywrightBrowserInstallerTest {
     @Test
     void ensureInstalled_NoOpWhenMirrorDisabled() {
         System.setProperty("playwright.mirror.enabled", "false");
+        RecordingInstaller installer = new RecordingInstaller();
+        installer.ensureInstalled("chromium");
+        assertEquals(0, installer.calls.get());
+    }
+
+    @Test
+    void ensureInstalled_NoOpInRemoteMode() {
+        assumeTrue(System.getenv("PLAYWRIGHT_MODE") == null);
+        System.setProperty("playwright.mirror.enabled", "true");
+        System.setProperty("playwright.mode", "remote");
         RecordingInstaller installer = new RecordingInstaller();
         installer.ensureInstalled("chromium");
         assertEquals(0, installer.calls.get());

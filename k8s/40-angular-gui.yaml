@@ -1,0 +1,53 @@
+# Angular-Vorgangs-Dashboard (statisch via nginx) – Testziel der @GUI-Szenarien.
+# Der Browser im Playwright-Sidecar des cucumber-test-service ruft es über den Service auf
+# (BASEURL=http://angular-gui:8080/). Image lokal bauen + in k3s importieren (README).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: angular-gui
+  namespace: test-automation
+  labels:
+    app: angular-gui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: angular-gui
+  template:
+    metadata:
+      labels:
+        app: angular-gui
+    spec:
+      containers:
+        - name: angular-gui
+          image: angular-gui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "20m"
+            limits:
+              memory: "128Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: angular-gui
+  namespace: test-automation
+  labels:
+    app: angular-gui
+spec:
+  selector:
+    app: angular-gui
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

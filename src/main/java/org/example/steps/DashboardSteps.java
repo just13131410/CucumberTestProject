@@ -305,6 +305,24 @@ public class DashboardSteps extends BasePage {
         assertThat(page.locator(".detail-page")).containsText("UUID:");
     }
 
+    @Und("ich auf den Button zum Kopieren der UUID klicke")
+    public void ich_auf_den_button_zum_kopieren_der_uuid_klicke() {
+        // Zwischenablage-Zugriff wird für den UUID-Kopieren-Test benötigt; ohne Grant
+        // liefert navigator.clipboard.readText() einen NotAllowedError.
+        page.context().grantPermissions(
+                java.util.List.of("clipboard-read", "clipboard-write"),
+                new BrowserContext.GrantPermissionsOptions().setOrigin(baseUrl.replaceFirst("/$", "")));
+        page.locator("button.copy-uuid-btn").click();
+    }
+
+    @Dann("sollte die UUID des Vorgangs in der Zwischenablage sein")
+    public void sollte_die_uuid_des_vorgangs_in_der_zwischenablage_sein() {
+        String uuid = page.locator(".uuid-value").textContent().trim();
+        String clipboardText = (String) page.evaluate("() => navigator.clipboard.readText()");
+        assertEquals(uuid, clipboardText);
+        captureScreenshot(page, "UUIDKopiert", currentScenario);
+    }
+
     @Gegebensei("ich bin nicht eingeloggt")
     public void ich_bin_nicht_eingeloggt() {
         page.navigate(baseUrl + "login");

@@ -27,6 +27,11 @@ public class PlaywrightStartupInstaller implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        if (PlaywrightRemoteConfig.isRemoteEnabled()) {
+            log.info("playwright.mode=remote ({}) – kein Browser-Download beim Start.",
+                    PlaywrightRemoteConfig.endpoint());
+            return;
+        }
         boolean mirrorEnabled = PlaywrightMirrorConfig.isMirrorEnabled();
         boolean installOnStartup = PlaywrightMirrorConfig.isInstallOnStartup();
         if (!mirrorEnabled || !installOnStartup) {

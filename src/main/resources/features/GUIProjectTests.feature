@@ -45,6 +45,13 @@ Funktionalität: Vorgangs-Dashboard
     Und der Dialog sollte die UUID des Vorgangs anzeigen
 
   @smoketest
+  Szenario: UUID in die Zwischenablage kopieren
+    Gegeben sei ich bin auf dem Dashboard eingeloggt
+    Wenn ich in der ersten Zeile auf den Detail-Button klicke
+    Und ich auf den Button zum Kopieren der UUID klicke
+    Dann sollte die UUID des Vorgangs in der Zwischenablage sein
+
+  @smoketest
   Szenario: Sicherheit - Direkter Zugriff ohne Login
     Gegeben sei ich bin nicht eingeloggt
     Wenn ich versuche die URL "/dashboard" direkt aufzurufen

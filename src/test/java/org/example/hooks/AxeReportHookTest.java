@@ -162,12 +162,68 @@ class AxeReportHookTest {
         AxeReportHook.generateIndexHtml(dir, java.util.List.of(a, b));
 
         String html = java.nio.file.Files.readString(dir.resolve("index.html"));
-        assertTrue(html.contains("A.html") && html.contains("B.html"));
         assertTrue(html.contains("http://x/&lt;script&gt;"), "URL wird HTML-escaped");
         assertFalse(html.contains("<script>"));
         try (var files = java.nio.file.Files.list(dir)) {
             assertEquals(1, files.count(), "Nur index.html, keine .tmp-Reste");
         }
+    }
+
+    @Test
+    void generateIndexHtml_LinksToSectionsInSameFile_WithoutDetailFiles(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        AxeReportHook.ScanSummary login = AxeReportHook.summarize(json("""
+                {"url":"http://gui/login","violations":[{"id":"landmark-one-main","impact":"moderate",
+                  "help":"Document should have one main landmark","helpUrl":"https://dequeuniversity.com/rules/x",
+                  "nodes":[{"html":"<html lang=\\"en\\">","target":["html"]}]}]}
+                """), "Login-audit-1_2", "Login-audit-1_2.html");
+        AxeReportHook.ScanSummary dashboard = AxeReportHook.summarize(json("""
+                {"url":"http://gui/dashboard","violations":[{"id":"button-name","impact":"critical",
+                  "help":"Buttons must have discernible text","nodes":[]}]}
+                """), "Dashboard-audit-3_4", "Dashboard-audit-3_4.html");
+
+        AxeReportHook.generateIndexHtml(dir, java.util.List.of(dashboard, login));
+
+        String html = java.nio.file.Files.readString(dir.resolve("index.html"));
+        for (AxeReportHook.ScanSummary scan : java.util.List.of(login, dashboard)) {
+            assertTrue(html.contains("href=\"#" + scan.anchor + "\""), "Tabelle verlinkt " + scan.anchor);
+            assertTrue(html.contains("id=\"" + scan.anchor + "\""), "Abschnitt " + scan.anchor + " vorhanden");
+        }
+        assertTrue(html.contains("Document should have one main landmark"));
+        assertTrue(html.contains("Buttons must have discernible text"));
+        assertTrue(html.contains("&lt;html lang=&quot;en&quot;&gt;"), "Element-HTML escaped");
+        assertFalse(html.contains("href=\"Login-audit-1_2.html\""), "keine Links auf separate Dateien");
+    }
+
+    @Test
+    void summarize_AnchorIsSafeAndUnique() throws Exception {
+        AxeReportHook.ScanSummary a = AxeReportHook.summarize(json("{}"), "Login-audit-1_2", null);
+        AxeReportHook.ScanSummary b = AxeReportHook.summarize(json("{}"), "Login audit\"<x>_3", null);
+
+        assertEquals("scan-Login-audit-1_2", a.anchor);
+        assertTrue(b.anchor.matches("[A-Za-z0-9_-]+"), b.anchor);
+        assertNotEquals(a.anchor, b.anchor);
+    }
+
+    @Test
+    void renderViolations_NoViolations_ShowsSuccessMessage() throws Exception {
+        assertTrue(AxeReportHook.renderViolations(json("[]")).contains("Keine Verstöße gefunden"));
+        assertTrue(AxeReportHook.renderViolations(null).contains("Keine Verstöße gefunden"));
+    }
+
+    @Test
+    void renderViolations_RendersImpactTargetsAndOnlyHttpHelpLinks() throws Exception {
+        String html = AxeReportHook.renderViolations(json("""
+                [{"id":"r1","impact":"serious","help":"H1","helpUrl":"javascript:alert(1)",
+                  "nodes":[{"target":["#a",["iframe","#b"]],"html":"<b>"}]},
+                 {"id":"r2","impact":null,"help":"H2","helpUrl":"https://example.org/r2"}]
+                """));
+
+        assertTrue(html.contains("violation-card serious") && html.contains("Schwerwiegend"));
+        assertTrue(html.contains("violation-card minor"), "fehlender Impact -> minor");
+        assertTrue(html.contains("Target: #a, iframe, #b"));
+        assertTrue(html.contains("&lt;b&gt;"));
+        assertFalse(html.contains("javascript:"), "nur http(s)-Hilfelinks");
+        assertTrue(html.contains("href=\"https://example.org/r2\""));
     }
 
     @Test

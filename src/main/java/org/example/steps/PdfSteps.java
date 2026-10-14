@@ -12,14 +12,19 @@ import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.example.cucumber.context.TestContext;
 import org.w3c.dom.Document;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
-import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -102,7 +107,11 @@ public class PdfSteps {
             Allure.addAttachment("Eingebettetes XML (aus PDF)", "text/xml",
                     new ByteArrayInputStream(xmlBytes), ".xml");
 
-            DocumentBuilder db = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+            // XXE-Härtung: keine DOCTYPEs/externen Entitäten aus eingebettetem XML auflösen
+            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+            dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            dbf.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            DocumentBuilder db = dbf.newDocumentBuilder();
             Document xml = db.parse(new ByteArrayInputStream(xmlBytes));
 
             Map<String, String[]> vergleiche = new LinkedHashMap<>();
@@ -165,7 +174,15 @@ public class PdfSteps {
                 userId, id, title, body.replace("\n", "<br />")
         );
 
-        try (OutputStream os = new FileOutputStream("test-results/Response.pdf")) {
+        // Pro Run isoliert statt fest nach test-results/Response.pdf (parallele Läufe überschrieben sich)
+        Path outputDir = TestContext.isInitialized() ? TestContext.getOutputBase() : Path.of("target");
+        Path pdfFile = outputDir.resolve("Response.pdf");
+        try {
+            Files.createDirectories(outputDir);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Ausgabeverzeichnis für PDF nicht anlegbar: " + outputDir, e);
+        }
+        try (OutputStream os = Files.newOutputStream(pdfFile)) {
             PdfRendererBuilder builder = new PdfRendererBuilder();
             builder.withHtmlContent(htmlContent, "/");
             builder.toStream(os);

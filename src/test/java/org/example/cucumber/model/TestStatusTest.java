@@ -1,5 +1,6 @@
 package org.example.cucumber.model;
 
+import org.example.cucumber.model.RunState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -74,13 +75,13 @@ class TestStatusTest {
         UUID runId = UUID.randomUUID();
         TestStatus status = TestStatus.builder()
                 .runId(runId)
-                .status("RUNNING")
+                .status(RunState.RUNNING)
                 .environment("dev")
                 .progress(50)
                 .build();
 
         assertEquals(runId, status.getRunId());
-        assertEquals("RUNNING", status.getStatus());
+        assertEquals(RunState.RUNNING, status.getStatus());
         assertEquals("dev", status.getEnvironment());
         assertEquals(50, status.getProgress());
     }
@@ -124,7 +125,7 @@ class TestStatusTest {
     void successRate_NotIncludedInJson() throws Exception {
         TestStatus status = TestStatus.builder()
                 .runId(UUID.randomUUID())
-                .status("COMPLETED")
+                .status(RunState.COMPLETED)
                 .totalTests(10)
                 .passedTests(8)
                 .build();
@@ -141,7 +142,7 @@ class TestStatusTest {
     void jiraTicketKey_AppearsInJsonWhenSet() throws Exception {
         TestStatus status = TestStatus.builder()
                 .runId(UUID.randomUUID())
-                .status("FAILED")
+                .status(RunState.FAILED)
                 .jiraTicketKey("PROJ-42")
                 .build();
 
@@ -154,7 +155,7 @@ class TestStatusTest {
     @Test
     void jiraTicketKey_AbsentFromJsonWhenNull() throws Exception {
         TestStatus status = TestStatus.builder()
-                .status("COMPLETED")
+                .status(RunState.COMPLETED)
                 .build();
 
         String json = new ObjectMapper().writeValueAsString(status);

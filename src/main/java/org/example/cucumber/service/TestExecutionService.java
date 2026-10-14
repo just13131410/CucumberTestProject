@@ -3,6 +3,7 @@ package org.example.cucumber.service;
 import org.example.CucumberRunnerService;
 import org.example.cucumber.context.TestContext;
 import org.example.cucumber.model.TestExecutionRequest;
+import org.example.cucumber.model.RunState;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.zephyr.ZephyrScaleService;
@@ -19,11 +20,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,6 +36,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -57,9 +61,21 @@ public class TestExecutionService {
     /** Begrenzte Warteschlange für echte Backpressure. {@code test.execution.max-queue-size}. */
     private final int maxQueueSize;
 
-    /** Blockiert die Menge der verbotenen System-Property-Präfixe aus Request-Env-Variablen. */
-    private static final List<String> BLOCKED_PROP_PREFIXES =
-            List.of("java.", "sun.", "os.", "user.", "spring.", "management.", "server.");
+    /**
+     * Allowlist der Keys, die ein Request über {@code environmentVariables} für die Dauer eines
+     * Laufs als System-Property setzen darf ({@code test.execution.allowed-override-keys},
+     * kommagetrennt, Default leer = keine). Bewusst keine Denylist: {@code ConfigReader} liest
+     * System-Properties zur Laufzeit, jeder nicht gesperrte Key (z.B. {@code apiURL},
+     * {@code playwright.download.host}) wäre sonst vom Aufrufer überschreibbar.
+     */
+    private final Set<String> allowedOverrideKeys;
+
+    /** Gherkin-Schlüsselwörter für Szenarien (englisch + deutsch), nicht für Examples-Tabellen. */
+    private static final Pattern SCENARIO_LINE = Pattern.compile(
+            "^\\s*(Scenario|Scenario Outline|Scenario Template|Example|Szenario|Szenariogrundriss|Beispiel):");
+
+    /** Lazy berechnet: die Feature-Dateien ändern sich zur Laufzeit nicht. */
+    private volatile Integer scenarioCount;
 
     private final CucumberRunnerService cucumberRunnerService;
     private final ZephyrScaleService zephyrScaleService;
@@ -77,12 +93,14 @@ public class TestExecutionService {
                                 RunStatusRegistry statusRegistry,
                                 AllureReportService allureReportService,
                                 @Value("${test.execution.max-concurrent-runs:1}") int maxConcurrentRuns,
-                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize) {
+                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize,
+                                @Value("${test.execution.allowed-override-keys:}") String allowedOverrideKeys) {
         this.cucumberRunnerService = cucumberRunnerService;
         this.zephyrScaleService = zephyrScaleService;
         this.persistence = persistence;
         this.statusRegistry = statusRegistry;
         this.allureReportService = allureReportService;
+        this.allowedOverrideKeys = parseKeys(allowedOverrideKeys);
         if (maxConcurrentRuns > 1) {
             log.error("test.execution.max-concurrent-runs={} ignoriert und auf 1 geklemmt: "
                     + "applyRunProperties()/restoreRunProperties() mutieren prozessweite System-Properties "
@@ -110,7 +128,15 @@ public class TestExecutionService {
     public TestExecutionService(CucumberRunnerService cucumberRunnerService,
                                 ZephyrScaleService zephyrScaleService) {
         this(cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
-                new RunStatusRegistry(24, 500), new AllureReportService(), 1, 20);
+                new RunStatusRegistry(24, 500), new AllureReportService(), 1, 20, "");
+    }
+
+    static Set<String> parseKeys(String csv) {
+        if (csv == null || csv.isBlank()) return Set.of();
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(k -> !k.isEmpty())
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     public TestExecutionResponse queueTestExecution(TestExecutionRequest request) {
@@ -126,7 +152,7 @@ public class TestExecutionService {
         // Initial status: QUEUED
         TestStatus status = TestStatus.builder()
                 .runId(runId)
-                .status("QUEUED")
+                .status(RunState.QUEUED)
                 .environment(request.getEnvironment())
                 .progress(0)
                 .build();
@@ -151,7 +177,7 @@ public class TestExecutionService {
 
         return TestExecutionResponse.builder()
                 .runId(runId)
-                .status("QUEUED")
+                .status(RunState.QUEUED)
                 .environment(request.getEnvironment())
                 .message("Test execution queued successfully")
                 .timestamp(LocalDateTime.now())
@@ -162,15 +188,20 @@ public class TestExecutionService {
 
     private void executeTest(UUID runId, String tags, String features, TestExecutionRequest request) {
         try {
-            statusRegistry.updateStatus(runId, "RUNNING", null);
-            statusRegistry.get(runId).setStartTime(LocalDateTime.now());
-            statusRegistry.get(runId).setCurrentPhase("EXECUTING");
+            // false = Status fehlt oder ist bereits final (z.B. vor dem Start abgebrochen)
+            TestStatus running = statusRegistry.get(runId);
+            if (running == null || !statusRegistry.updateStatus(runId, RunState.RUNNING, null)) {
+                log.warn("Lauf runId={} übersprungen: Status fehlt oder ist bereits abgeschlossen", runId);
+                return;
+            }
+            running.setStartTime(LocalDateTime.now());
+            running.setCurrentPhase("EXECUTING");
 
             // Run-spezifische System-Properties setzen; vorherige Werte für sauberes Restore merken.
             Map<String, String> previousProps = applyRunProperties(request);
 
             // Count expected scenarios for progress tracking (best-effort, tag-unaware)
-            int totalScenarios = countScenariosInFeatures();
+            int totalScenarios = scenarioCount();
             Path allureResultsPath = allureReportService.getResultsPath(runId).resolve("allure-results");
             ScheduledExecutorService progressTracker = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "progress-tracker-" + runId.toString().substring(0, 8));
@@ -203,7 +234,8 @@ public class TestExecutionService {
                 restoreRunProperties(previousProps);
             }
 
-            TestStatus status = statusRegistry.get(runId);
+            // Nicht erneut aus der Registry holen: ein paralleles Delete/Evict ergäbe sonst eine NPE.
+            TestStatus status = running;
             status.setEndTime(LocalDateTime.now());
             Duration elapsed = Duration.between(status.getStartTime(), status.getEndTime());
             status.setDuration(String.format("%02d:%02d", elapsed.toMinutes(), elapsed.toSecondsPart()));
@@ -228,9 +260,9 @@ public class TestExecutionService {
             status.setReportUrls(reportUrls);
 
             if (result.exitCode() == 0) {
-                statusRegistry.updateStatus(runId, "COMPLETED", null);
+                statusRegistry.updateStatus(runId, RunState.COMPLETED, null);
             } else {
-                statusRegistry.updateStatus(runId, "FAILED", "Tests finished with exit code: " + result.exitCode());
+                statusRegistry.updateStatus(runId, RunState.FAILED, "Tests finished with exit code: " + result.exitCode());
             }
 
             // Write executor.json for Allure (enables executor widget and trends in combined reports)
@@ -259,7 +291,7 @@ public class TestExecutionService {
 
         } catch (Exception e) {
             log.error("Test execution error: runId={}", runId, e);
-            statusRegistry.updateStatus(runId, "FAILED", e.getMessage());
+            statusRegistry.updateStatus(runId, RunState.FAILED, e.getMessage());
             TestStatus st = statusRegistry.get(runId);
             if (st != null) {
                 st.setEndTime(LocalDateTime.now());
@@ -279,18 +311,7 @@ public class TestExecutionService {
      * @return Map key → vorheriger Wert (null-Wert bedeutet: Property war vorher nicht gesetzt)
      */
     private Map<String, String> applyRunProperties(TestExecutionRequest request) {
-        Map<String, String> toSet = new LinkedHashMap<>();
-        if (request.getEnvironmentVariables() != null) {
-            request.getEnvironmentVariables().forEach((k, v) -> {
-                if (k == null || v == null) return;
-                String lower = k.toLowerCase();
-                if (BLOCKED_PROP_PREFIXES.stream().anyMatch(lower::startsWith)) {
-                    log.warn("Ignoriere nicht erlaubte System-Property aus Request: {}", k);
-                    return;
-                }
-                toSet.put(k, v);
-            });
-        }
+        Map<String, String> toSet = filterOverrides(request.getEnvironmentVariables(), allowedOverrideKeys);
         if (request.getBrowser() != null) {
             toSet.put("browser", request.getBrowser());
         }
@@ -304,6 +325,24 @@ public class TestExecutionService {
             System.setProperty(k, v);
         });
         return previous;
+    }
+
+    /**
+     * Lässt nur Keys aus der Allowlist durch (exakter Vergleich); alles andere wird verworfen und
+     * protokolliert. Null-Keys/-Werte werden ignoriert.
+     */
+    static Map<String, String> filterOverrides(Map<String, String> requested, Set<String> allowed) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (requested == null) return result;
+        requested.forEach((k, v) -> {
+            if (k == null || v == null) return;
+            if (!allowed.contains(k)) {
+                log.warn("Ignoriere nicht freigegebenen Override-Key aus Request: {}", k);
+                return;
+            }
+            result.put(k, v);
+        });
+        return result;
     }
 
     /** Stellt die vor dem Lauf gesetzten System-Properties wieder her (null = löschen). */
@@ -329,7 +368,7 @@ public class TestExecutionService {
             for (TestStatus s : persistence.loadAllStatuses()) {
                 if (s == null || s.getRunId() == null) continue;
                 if (!RunStatusRegistry.isTerminal(s.getStatus())) {
-                    s.setStatus("INTERRUPTED");
+                    s.setStatus(RunState.INTERRUPTED);
                     s.setErrorMessage("Service wurde während des Laufs neu gestartet");
                     if (s.getEndTime() == null) s.setEndTime(LocalDateTime.now());
                     persistence.saveStatus(s.getRunId(), s);
@@ -362,7 +401,7 @@ public class TestExecutionService {
         return statusRegistry.getActiveTests();
     }
 
-    public Optional<Object> getTestReport(UUID runId) {
+    public Optional<Path> getTestReport(UUID runId) {
         return allureReportService.getTestReport(runId);
     }
 
@@ -378,8 +417,8 @@ public class TestExecutionService {
         Future<?> future = runningFutures.get(runId);
         if (future != null && !future.isDone()) {
             future.cancel(true);
-            statusRegistry.updateStatus(runId, "CANCELLED", "Cancelled by user");
-            statusRegistry.get(runId).setEndTime(LocalDateTime.now());
+            statusRegistry.updateStatus(runId, RunState.CANCELLED, "Cancelled by user");
+            statusRegistry.find(runId).ifPresent(s -> s.setEndTime(LocalDateTime.now()));
             runningFutures.remove(runId);
             log.info("Test execution cancelled: runId={}", runId);
             return statusRegistry.find(runId);
@@ -392,7 +431,7 @@ public class TestExecutionService {
         if (status == null) return false;
 
         // Don't delete running tests
-        if ("RUNNING".equals(status.getStatus()) || "QUEUED".equals(status.getStatus())) {
+        if (status.getStatus() != null && status.getStatus().isActive()) {
             return false;
         }
 
@@ -437,16 +476,26 @@ public class TestExecutionService {
                             try { return Files.lines(p); }
                             catch (IOException e) { return Stream.empty(); }
                         })
-                        .filter(line -> {
-                            String t = line.trim();
-                            return t.startsWith("Scenario:") || t.startsWith("Scenario Outline:");
-                        })
+                        .filter(TestExecutionService::isScenarioLine)
                         .count();
             }
         } catch (Exception e) {
             log.debug("Could not count scenarios in feature files: {}", e.getMessage());
             return 0;
         }
+    }
+
+    private int scenarioCount() {
+        Integer count = scenarioCount;
+        if (count == null) {
+            count = countScenariosInFeatures();
+            scenarioCount = count;
+        }
+        return count;
+    }
+
+    static boolean isScenarioLine(String line) {
+        return SCENARIO_LINE.matcher(line).find();
     }
 
     private String buildTagsExpression(List<String> tags) {

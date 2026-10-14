@@ -9,6 +9,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -49,14 +51,17 @@ public class ReportController {
             @ApiResponse(responseCode = "404", description = "Report nicht gefunden"),
             @ApiResponse(responseCode = "425", description = "Test noch nicht abgeschlossen")
     })
-    public ResponseEntity<Object> getTestReport(
+    public ResponseEntity<Resource> getTestReport(
             @Parameter(description = "Test Run ID", required = true)
             @PathVariable("runId") UUID runId) {
 
         log.debug("Fetching report for runId: {}", runId);
 
+        // Datei streamen statt komplett in den Speicher zu laden (Cucumber.json kann mehrere MB groß sein)
         return testExecutionService.getTestReport(runId)
-                .map(ResponseEntity::ok)
+                .<ResponseEntity<Resource>>map(path -> ResponseEntity.ok()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(new FileSystemResource(path)))
                 .orElse(ResponseEntity.notFound().build());
     }
 

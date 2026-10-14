@@ -7,6 +7,7 @@ import io.qameta.allure.restassured.AllureRestAssured;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
 import org.example.utils.ConfigReader;
+import org.example.utils.RestAssuredSecrets;
 import org.junit.jupiter.api.Assumptions;
 
 import java.util.Map;
@@ -148,6 +149,7 @@ public class TodoApiSteps {
 
     private RequestSpecification todoRequest() {
         return given()
+                .config(RestAssuredSecrets.config()) // JWT nicht im Klartext in Allure-Anhängen
                 .filter(new AllureRestAssured())
                 .baseUri(todoApiUrl);
     }

@@ -1,5 +1,6 @@
 package org.example.cucumber.controller;
 
+import org.example.cucumber.model.RunState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.example.cucumber.model.TestExecutionResponse;
@@ -44,7 +45,9 @@ class TestExecutionControllerTest {
     @BeforeEach
     void setUp() {
         controller = new TestExecutionController(testExecutionService, new ReportUrlResolver());
-        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
     }
 
     // --- POST /api/v1/test/execute ---
@@ -53,7 +56,7 @@ class TestExecutionControllerTest {
     void executeTests_ValidRequest_Returns202() throws Exception {
         TestExecutionResponse response = TestExecutionResponse.builder()
                 .runId(TEST_RUN_ID)
-                .status("QUEUED")
+                .status(RunState.QUEUED)
                 .environment("dev")
                 .message("Test execution queued successfully")
                 .timestamp(LocalDateTime.now())
@@ -94,7 +97,7 @@ class TestExecutionControllerTest {
     void getTestStatus_ExistingRun_Returns200() throws Exception {
         TestStatus status = TestStatus.builder()
                 .runId(TEST_RUN_ID)
-                .status("RUNNING")
+                .status(RunState.RUNNING)
                 .environment("dev")
                 .progress(50)
                 .build();
@@ -122,8 +125,8 @@ class TestExecutionControllerTest {
 
     @Test
     void getActiveTests_ReturnsList() throws Exception {
-        TestStatus status1 = TestStatus.builder().runId(UUID.randomUUID()).status("RUNNING").build();
-        TestStatus status2 = TestStatus.builder().runId(UUID.randomUUID()).status("QUEUED").build();
+        TestStatus status1 = TestStatus.builder().runId(UUID.randomUUID()).status(RunState.RUNNING).build();
+        TestStatus status2 = TestStatus.builder().runId(UUID.randomUUID()).status(RunState.QUEUED).build();
 
         when(testExecutionService.getActiveTests())
                 .thenReturn(List.of(status1, status2));
@@ -151,7 +154,7 @@ class TestExecutionControllerTest {
     void cancelTestExecution_Existing_Returns200() throws Exception {
         TestStatus cancelled = TestStatus.builder()
                 .runId(TEST_RUN_ID)
-                .status("CANCELLED")
+                .status(RunState.CANCELLED)
                 .build();
 
         when(testExecutionService.cancelTestExecution(TEST_RUN_ID))
@@ -259,4 +262,24 @@ class TestExecutionControllerTest {
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
+
+    @Test
+    void executeTests_CapacityExceeded_Returns429ViaControllerAdvice() throws Exception {
+        when(testExecutionService.queueTestExecution(any()))
+                .thenThrow(new org.example.cucumber.service.CapacityExceededException("voll"));
+
+        mockMvc.perform(post("/api/v1/test/execute")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"environment\":\"dev\",\"tags\":[\"@smoke\"]}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("capacity_exceeded"));
+    }
+
+    @Test
+    void executeTests_InvalidFeaturePath_Returns400() throws Exception {
+        mockMvc.perform(post("/api/v1/test/execute")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"environment\":\"dev\",\"tags\":[\"@smoke\"],\"features\":[\"../x.feature\"]}"))
+                .andExpect(status().isBadRequest());
+    }
 }

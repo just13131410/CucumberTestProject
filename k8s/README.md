@@ -143,7 +143,7 @@ GUI-Lauf triggern:
 curl -s -X POST http://localhost:8080/api/v1/test/execute -H 'Content-Type: application/json'   -d '{"environment":"dev","tags":["@GUI"]}'
 ```
 Im Manifest gesetzt (alle per `x-playwright-launch-options` an den Server durchgereicht):
-`BROWSER_HEADLESS=true` (das dev-Profil setzt sonst `false` → kein X-Server), sowie
+`BROWSER_HEADLESS=true` (explizit; das dev-Profil würde `false` setzen → kein X-Server), sowie
 `PLAYWRIGHT_REMOTE_CHANNEL=chromium` + `BROWSER_EXTRA_ARGS=--unsafely-treat-insecure-origin-as-secure=http://angular-gui:8080`:
 Die Angular-App nutzt `crypto.randomUUID()`, das es nur im Secure Context (HTTPS/localhost) gibt.
 Das Flag wirkt nur im vollen Chromium, nicht in der Headless-Shell. Bei HTTPS-Zielen entfällt beides.

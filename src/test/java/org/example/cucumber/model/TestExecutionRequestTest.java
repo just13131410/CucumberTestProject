@@ -108,17 +108,12 @@ class TestExecutionRequestTest {
     }
 
     @Test
-    void builderDefaults_AreCorrect() {
+    void builderDefaults_HeadlessTrue() {
         TestExecutionRequest request = TestExecutionRequest.builder()
                 .environment("dev")
                 .tags(List.of("@smoke"))
                 .build();
 
-        assertEquals(5, request.getParallelCount());
-        assertTrue(request.getRetryFailedTests());
-        assertEquals(2, request.getMaxRetries());
-        assertEquals(30, request.getTimeoutMinutes());
-        assertEquals("NORMAL", request.getPriority());
         assertTrue(request.getHeadless());
     }
 
@@ -132,29 +127,76 @@ class TestExecutionRequestTest {
         assertNull(request.getFeatures());
         assertNull(request.getBrowser());
         assertNull(request.getEnvironmentVariables());
-        assertNull(request.getWebhookUrl());
-        assertNull(request.getInitiator());
         assertNull(request.getProjectKey());
         assertNull(request.getZephyrTemplateTestRunKey());
         assertNull(request.getZephyrResultFolder());
     }
 
-    @Test
-    void builder_OverridesDefaults() {
-        TestExecutionRequest request = TestExecutionRequest.builder()
-                .environment("prod")
-                .tags(List.of("@critical"))
-                .parallelCount(10)
-                .retryFailedTests(false)
-                .maxRetries(5)
-                .timeoutMinutes(60)
-                .priority("CRITICAL")
-                .build();
+    // --- Allowlist-Validierung (S5/S6) ---
 
-        assertEquals(10, request.getParallelCount());
-        assertFalse(request.getRetryFailedTests());
-        assertEquals(5, request.getMaxRetries());
-        assertEquals(60, request.getTimeoutMinutes());
-        assertEquals("CRITICAL", request.getPriority());
+    private TestExecutionRequest.TestExecutionRequestBuilder valid() {
+        return TestExecutionRequest.builder().environment("dev").tags(List.of("@smoke"));
+    }
+
+    private boolean violates(TestExecutionRequest request, String propertyPrefix) {
+        return validator.validate(request).stream()
+                .anyMatch(v -> v.getPropertyPath().toString().startsWith(propertyPrefix));
+    }
+
+    @Test
+    void tags_SimpleTagsValid_ExpressionsAndSpecialCharsRejected() {
+        assertFalse(violates(valid().tags(List.of("@smoke", "API-Test", "@T-1234")).build(), "tags"));
+        assertTrue(violates(valid().tags(List.of("@a and not @b")).build(), "tags"));
+        assertTrue(violates(valid().tags(List.of("@x) or (@y")).build(), "tags"));
+    }
+
+    @Test
+    void features_RelativeFeaturePathsValid() {
+        assertFalse(violates(valid().features(List.of(
+                "GUIProjectTests.feature", "api/Todo-API-Test.feature", "API-Test.feature:12:20")).build(), "features"));
+    }
+
+    @Test
+    void features_TraversalAbsolutePathsAndOptionsRejected() {
+        for (String bad : List.of("../secret.feature", "/etc/passwd", "--plugin", "classpath:features/x.feature",
+                "C:/x.feature", "x.txt", "a/../b.feature")) {
+            assertTrue(violates(valid().features(List.of(bad)).build(), "features"), bad);
+        }
+    }
+
+    @Test
+    void browser_OnlyKnownBrowsers() {
+        assertFalse(violates(valid().browser("Firefox").build(), "browser"));
+        assertTrue(violates(valid().browser("/bin/sh").build(), "browser"));
+    }
+
+    @Test
+    void zephyrTemplateTestRunKey_PathInjectionRejected() {
+        assertFalse(violates(valid().zephyrTemplateTestRunKey("PROJ-C15").build(), "zephyrTemplateTestRunKey"));
+        assertFalse(violates(valid().zephyrTemplateTestRunKey("QA-R1").build(), "zephyrTemplateTestRunKey"));
+        assertTrue(violates(valid().zephyrTemplateTestRunKey("../../api/2/myself").build(), "zephyrTemplateTestRunKey"));
+        assertTrue(violates(valid().zephyrTemplateTestRunKey("PROJ-C1?x=1").build(), "zephyrTemplateTestRunKey"));
+    }
+
+    @Test
+    void projectKey_OnlyJiraStyleKeys() {
+        assertFalse(violates(valid().projectKey("PROJ").build(), "projectKey"));
+        assertTrue(violates(valid().projectKey("proj").build(), "projectKey"));
+        assertTrue(violates(valid().projectKey("PROJ/../X").build(), "projectKey"));
+    }
+
+    @Test
+    void environmentVariables_SizeLimited() {
+        java.util.Map<String, String> many = new java.util.HashMap<>();
+        for (int i = 0; i < 21; i++) many.put("k" + i, "v");
+        assertTrue(violates(valid().environmentVariables(many).build(), "environmentVariables"));
+    }
+
+    @Test
+    void json_UnknownLegacyFieldsAreIgnored() throws Exception {
+        String json = "{\"environment\":\"dev\",\"tags\":[\"@smoke\"],\"parallelCount\":5,\"priority\":\"HIGH\"}";
+        TestExecutionRequest request = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(json, TestExecutionRequest.class);
+        assertEquals("dev", request.getEnvironment());
     }
 }

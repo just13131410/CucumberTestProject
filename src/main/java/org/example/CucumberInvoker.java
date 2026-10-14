@@ -4,12 +4,15 @@ import io.qameta.allure.Allure;
 import io.qameta.allure.AllureLifecycle;
 import io.qameta.allure.FileSystemResultsWriter;
 import org.example.cucumber.context.TestContext;
+import org.example.hooks.AxeReportHook;
 
 import io.cucumber.core.cli.Main;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Führt einen Cucumber-Lauf für einen bereits normalisierten Tag-Ausdruck aus – in-process im
@@ -24,12 +27,14 @@ import java.util.ArrayList;
  */
 public final class CucumberInvoker {
 
+    static final String FEATURES_ROOT = "classpath:features";
+
     private CucumberInvoker() {}
 
     /**
      * @param runId    eindeutige Run-ID (bestimmt die Ausgabeverzeichnisse via TestContext)
      * @param tags     bereits normalisierter Tag-Ausdruck (z.B. "@smoke or @regression") oder null
-     * @param features optionaler Feature-Pfad oder null (dann {@code classpath:features})
+     * @param features optionale, kommagetrennte Feature-Pfade relativ zu {@code classpath:features} oder null
      * @return Cucumber-Exit-Code (0 = alle bestanden)
      */
     public static int invoke(String runId, String tags, String features) throws Exception {
@@ -51,33 +56,50 @@ public final class CucumberInvoker {
             System.setProperty("allure.results.directory", allureResults.toString());
             Allure.setLifecycle(new AllureLifecycle(new FileSystemResultsWriter(allureResults)));
 
-            var argsList = new ArrayList<String>();
-            argsList.add("--glue");
-            argsList.add("org.example");
-            argsList.add("--plugin");
-            argsList.add("pretty");
-            argsList.add("--plugin");
-            argsList.add("json:" + cucumberReports.resolve("Cucumber.json"));
-            argsList.add("--plugin");
-            argsList.add("html:" + cucumberReports.resolve("Cucumber.html"));
-            argsList.add("--plugin");
-            argsList.add("io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm");
+            List<String> argsList = buildArgs(cucumberReports, tags, features);
 
-            if (tags != null && !tags.isBlank()) {
-                argsList.add("--tags");
-                argsList.add(tags);
-            }
-
-            if (features != null && !features.isBlank()) {
-                argsList.add(features);
-            } else {
-                argsList.add("classpath:features");
-            }
-
-            String[] args = argsList.toArray(new String[0]);
-            return Main.run(args, Thread.currentThread().getContextClassLoader());
+            return Main.run(argsList.toArray(new String[0]), Thread.currentThread().getContextClassLoader());
         } finally {
+            AxeReportHook.forgetRun(TestContext.getAxeResultDir());
             TestContext.clear();
         }
+    }
+
+    /**
+     * Baut die Cucumber-CLI-Argumente. {@code features} ist eine kommagetrennte Liste relativer
+     * Pfade unterhalb von {@code classpath:features} (per {@code TestExecutionRequest} validiert);
+     * jede Datei wird ein eigenes Argument, sonst sucht Cucumber nach einer Datei namens
+     * {@code "a.feature,b.feature"}.
+     */
+    static List<String> buildArgs(Path cucumberReports, String tags, String features) {
+        List<String> args = new ArrayList<>();
+        args.add("--glue");
+        args.add("org.example");
+        args.add("--plugin");
+        args.add("pretty");
+        args.add("--plugin");
+        args.add("json:" + cucumberReports.resolve("Cucumber.json"));
+        args.add("--plugin");
+        args.add("html:" + cucumberReports.resolve("Cucumber.html"));
+        args.add("--plugin");
+        args.add("io.qameta.allure.cucumber7jvm.AllureCucumber7Jvm");
+
+        if (tags != null && !tags.isBlank()) {
+            args.add("--tags");
+            args.add(tags);
+        }
+
+        List<String> featurePaths = features == null ? List.of()
+                : Arrays.stream(features.split(","))
+                        .map(String::trim)
+                        .filter(f -> !f.isEmpty())
+                        .map(f -> FEATURES_ROOT + "/" + f)
+                        .toList();
+        if (featurePaths.isEmpty()) {
+            args.add(FEATURES_ROOT);
+        } else {
+            args.addAll(featurePaths);
+        }
+        return args;
     }
 }

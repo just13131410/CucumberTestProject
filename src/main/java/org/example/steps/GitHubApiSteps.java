@@ -6,6 +6,7 @@ import io.qameta.allure.Allure;
 import io.qameta.allure.restassured.AllureRestAssured;
 import io.restassured.specification.RequestSpecification;
 import org.example.utils.ConfigReader;
+import org.example.utils.RestAssuredSecrets;
 import org.junit.jupiter.api.Assumptions;
 
 import static io.restassured.RestAssured.given;
@@ -78,6 +79,7 @@ public class GitHubApiSteps {
 
     private RequestSpecification baseRequest() {
         return given()
+                .config(RestAssuredSecrets.config()) // Bearer-Token nicht im Klartext in Allure-Anhängen
                 .filter(new AllureRestAssured())
                 .baseUri(baseUrl)
                 .header("Accept", "application/vnd.github+json")

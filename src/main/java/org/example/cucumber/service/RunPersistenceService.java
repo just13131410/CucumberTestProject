@@ -10,8 +10,10 @@ import org.example.utils.TestResultPaths;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -47,7 +49,7 @@ public class RunPersistenceService {
         Path dir = TestResultPaths.forRun(runId.toString());
         if (!Files.exists(dir)) return;
         try {
-            mapper.writeValue(dir.resolve(STATUS_FILE).toFile(), status);
+            writeAtomically(dir.resolve(STATUS_FILE), status);
         } catch (IOException e) {
             log.warn("Konnte Status nicht persistieren (runId={}): {}", runId, e.getMessage());
         }
@@ -58,10 +60,29 @@ public class RunPersistenceService {
         Path dir = TestResultPaths.forRun(runId.toString());
         if (!Files.exists(dir)) return;
         try {
-            mapper.writeValue(dir.resolve(OUTBOX_FILE).toFile(),
-                    new OutboxEntry(runId.toString(), request, exitCode));
+            writeAtomically(dir.resolve(OUTBOX_FILE), new OutboxEntry(runId.toString(), request, exitCode));
         } catch (IOException e) {
             log.warn("Konnte Outbox nicht schreiben (runId={}): {}", runId, e.getMessage());
+        }
+    }
+
+    /**
+     * Schreibt erst in eine Temp-Datei im selben Verzeichnis und verschiebt sie dann atomar ans Ziel.
+     * Ein Absturz mitten im Schreiben hinterlässt so nie halbes JSON, das der Reconcile beim Start
+     * nicht mehr lesen könnte. Fällt auf ein normales Ersetzen zurück, wenn das Dateisystem keinen
+     * atomaren Move unterstützt.
+     */
+    void writeAtomically(Path target, Object value) throws IOException {
+        Path tmp = Files.createTempFile(target.getParent(), target.getFileName().toString(), ".tmp");
+        try {
+            mapper.writeValue(tmp.toFile(), value);
+            try {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tmp);
         }
     }
 

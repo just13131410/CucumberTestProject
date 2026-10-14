@@ -209,4 +209,52 @@ class AllureReportServiceTest {
             System.clearProperty("test.results.path");
         }
     }
+
+    // --- S7: Serialisierung der Report-Erzeugung ---
+
+    @Test
+    void generateCombinedAllureReport_WhileAnotherIsRunning_ThrowsCapacityExceeded() throws Exception {
+        java.lang.reflect.Field field = AllureReportService.class.getDeclaredField("combinedLock");
+        field.setAccessible(true);
+        java.util.concurrent.locks.ReentrantLock lock =
+                (java.util.concurrent.locks.ReentrantLock) field.get(allureReportService);
+        java.util.concurrent.CountDownLatch held = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Thread other = new Thread(() -> {
+            lock.lock();
+            try {
+                held.countDown();
+                release.await();
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            } finally {
+                lock.unlock();
+            }
+        });
+        other.start();
+        try {
+            held.await();
+            assertThrows(CapacityExceededException.class,
+                    () -> allureReportService.generateCombinedAllureReport(java.util.List.of(java.util.UUID.randomUUID())));
+        } finally {
+            release.countDown();
+            other.join();
+        }
+    }
+
+    @Test
+    void generateCombinedAllureReport_ReleasesLockAfterwards() {
+        // Kein Run vorhanden → Optional.empty(); der Lock muss danach wieder frei sein
+        assertTrue(allureReportService.generateCombinedAllureReport(java.util.List.of(java.util.UUID.randomUUID())).isEmpty());
+        assertTrue(allureReportService.generateCombinedAllureReport(java.util.List.of(java.util.UUID.randomUUID())).isEmpty());
+    }
+
+    @Test
+    void generateAllureReport_RemovesPerRunLockAfterwards() throws Exception {
+        allureReportService.generateAllureReport(java.util.UUID.randomUUID());
+
+        java.lang.reflect.Field field = AllureReportService.class.getDeclaredField("runLocks");
+        field.setAccessible(true);
+        assertTrue(((java.util.Map<?, ?>) field.get(allureReportService)).isEmpty(), "Kein Lock-Leck pro Run");
+    }
 }

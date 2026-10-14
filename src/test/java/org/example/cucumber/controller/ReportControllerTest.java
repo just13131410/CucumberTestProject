@@ -34,18 +34,37 @@ class ReportControllerTest {
     @BeforeEach
     void setUp() {
         controller = new ReportController(testExecutionService, new ReportUrlResolver());
-        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
     }
 
     // --- GET /api/v1/test/report/{runId} ---
 
     @Test
-    void getTestReport_Existing_Returns200() throws Exception {
-        when(testExecutionService.getTestReport(TEST_RUN_ID))
-                .thenReturn(Optional.of("[{\"feature\":\"test\"}]"));
+    void getTestReport_Existing_StreamsJsonFile() throws Exception {
+        java.nio.file.Path json = java.nio.file.Files.createTempFile("Cucumber", ".json");
+        try {
+            java.nio.file.Files.writeString(json, "[{\"feature\":\"test\"}]");
+            when(testExecutionService.getTestReport(TEST_RUN_ID)).thenReturn(Optional.of(json));
 
-        mockMvc.perform(get("/api/v1/test/report/{runId}", TEST_RUN_ID))
-                .andExpect(status().isOk());
+            mockMvc.perform(get("/api/v1/test/report/{runId}", TEST_RUN_ID))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(jsonPath("$[0].feature").value("test"));
+        } finally {
+            java.nio.file.Files.deleteIfExists(json);
+        }
+    }
+
+    @Test
+    void generateCombinedReport_AlreadyRunning_Returns429() throws Exception {
+        when(testExecutionService.generateCombinedAllureReport(any()))
+                .thenThrow(new org.example.cucumber.service.CapacityExceededException("läuft bereits"));
+
+        mockMvc.perform(post("/api/v1/test/report/combined/generate"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error").value("capacity_exceeded"));
     }
 
     @Test

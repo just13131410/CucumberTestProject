@@ -5,6 +5,7 @@ import io.cucumber.java.Before;
 import io.cucumber.java.Scenario;
 import io.cucumber.spring.CucumberContextConfiguration;
 import io.qameta.allure.Allure;
+import org.example.config.CucumberGlueConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,10 +13,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.time.LocalDateTime;
 
 /**
- * Cucumber Hooks fuer Setup und Teardown
+ * Cucumber Hooks fuer Setup und Teardown. Trägt die Spring-Konfiguration der Glue-Klassen:
+ * nur {@link CucumberGlueConfig}, ohne Web-Server und ohne die Service-Beans der Anwendung.
  */
 @CucumberContextConfiguration
-@SpringBootTest
+@SpringBootTest(classes = CucumberGlueConfig.class, webEnvironment = SpringBootTest.WebEnvironment.NONE)
 public class CucumberHooks {
 
     private static final Logger log = LoggerFactory.getLogger(CucumberHooks.class);

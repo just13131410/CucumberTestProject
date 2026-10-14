@@ -26,7 +26,7 @@ public class JiraClient extends AbstractAtlassianClient {
     // Spring's @Value liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
     @Autowired
     public JiraClient() {
-        this(new RestTemplate(),
+        this(defaultRestTemplate(),
                 ConfigReader.get("zephyr.base-url", "https://jira.yourcompany.com"),
                 ConfigReader.get("zephyr.username", ""),
                 ConfigReader.get("zephyr.api-token", ""));
@@ -47,7 +47,7 @@ public class JiraClient extends AbstractAtlassianClient {
             }
             return issue;
         } catch (HttpStatusCodeException e) {
-            log.error("Jira createIssue failed: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Jira createIssue failed: status={}, body={}", e.getStatusCode(), abbreviate(e.getResponseBodyAsString()));
             return null;
         }
     }

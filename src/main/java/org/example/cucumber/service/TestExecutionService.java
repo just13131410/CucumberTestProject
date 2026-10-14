@@ -10,8 +10,6 @@ import org.example.integration.zephyr.ZephyrScaleService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -361,8 +359,8 @@ public class TestExecutionService {
      * Beim App-Start: persistierte Run-Status wieder in den Speicher laden (Historie überlebt
      * Restart), nicht abgeschlossene Läufe als {@code INTERRUPTED} markieren und offene
      * Integrations-Outbox-Einträge nachholen (at-least-once Zephyr/Jira-Upload).
+     * Ausgelöst von {@link StartupReconciler}.
      */
-    @EventListener(ApplicationReadyEvent.class)
     public void reconcileAfterRestart() {
         try {
             for (TestStatus s : persistence.loadAllStatuses()) {

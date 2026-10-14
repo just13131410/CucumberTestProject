@@ -1,9 +1,11 @@
 package org.example.config;
 
+import org.example.cucumber.service.StartupReconciler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -13,8 +15,11 @@ import org.springframework.stereotype.Component;
  * Bewusst über eine separate Property gesteuert (Default {@code false}), damit Unit-Tests
  * mit {@code @SpringBootTest} beim Context-Start keinen Browser-Download auslösen. In
  * Prod/OpenShift bzw. beim lokalen App-Start wird die Property auf {@code true} gesetzt.
+ * Im Cucumber-Kontext (zweiter App-Start pro JVM) per {@code app.startup-tasks.enabled=false} ganz
+ * abgeschaltet.
  */
 @Component
+@ConditionalOnProperty(name = StartupReconciler.STARTUP_TASKS_ENABLED, havingValue = "true", matchIfMissing = true)
 public class PlaywrightStartupInstaller implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(PlaywrightStartupInstaller.class);

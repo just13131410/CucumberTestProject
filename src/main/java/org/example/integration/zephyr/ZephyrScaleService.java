@@ -11,6 +11,8 @@ import org.example.utils.ConfigReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -24,6 +26,7 @@ import java.util.stream.Collectors;
 public class ZephyrScaleService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final String DEFAULT_BASE_URL = "https://jira.yourcompany.com";
 
     private final ZephyrScaleClient zephyrClient;
     private final JiraClient jiraClient;
@@ -62,7 +65,11 @@ public class ZephyrScaleService {
 
     @PostConstruct
     private void validateConfig() {
-        logResolvedConfig();
+        var baseUrl = ConfigReader.getWithSource("zephyr.base-url", DEFAULT_BASE_URL);
+        logResolvedConfig(baseUrl);
+        if ((zephyrEnabled || jiraEnabled) && !mockEnabled) {
+            requireAbsoluteHttpUrl(baseUrl);
+        }
         if (zephyrEnabled && !mockEnabled && zephyrApiToken.isBlank()) {
             log.error("zephyr.enabled=true, aber zephyr.api-token ist leer - Zephyr-Uploads werden mit 401 fehlschlagen");
         }
@@ -76,8 +83,7 @@ public class ZephyrScaleService {
      * und aus welcher Quelle (Umgebungsvariable/.env/Secret-Datei/config.properties/Default) sie
      * stammen - der Token-Wert selbst wird nie geloggt, nur seine Laenge als Vorhanden-Nachweis.
      */
-    private void logResolvedConfig() {
-        var baseUrl = ConfigReader.getWithSource("zephyr.base-url", "https://jira.yourcompany.com");
+    private void logResolvedConfig(ConfigReader.ResolvedValue baseUrl) {
         var username = ConfigReader.getWithSource("zephyr.username", "");
         var token = ConfigReader.getWithSource("zephyr.api-token", "");
 
@@ -86,6 +92,27 @@ public class ZephyrScaleService {
                 username.value().isBlank() ? "<nicht gesetzt>" : username.value(), username.source(),
                 token.value().isBlank() ? "<nicht gesetzt>" : "***gesetzt, " + token.value().length() + " Zeichen***",
                 token.source());
+    }
+
+    /**
+     * Bricht den Start ab, wenn {@code zephyr.base-url} keine absolute http(s)-URL ist. Ohne Prüfung
+     * fiele das erst nach dem ersten Lauf beim Upload auf ({@code URI is not absolute} bzw. ein
+     * unbekanntes Schema), und der Lauf landete stillschweigend nicht in Zephyr/Jira.
+     */
+    static void requireAbsoluteHttpUrl(ConfigReader.ResolvedValue baseUrl) {
+        String value = baseUrl.value();
+        boolean valid;
+        try {
+            URI uri = new URI(value);
+            valid = ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                    && uri.getHost() != null;
+        } catch (URISyntaxException e) {
+            valid = false;
+        }
+        if (!valid) {
+            throw new IllegalStateException("zephyr.base-url muss eine absolute http(s)-URL sein (z.B. "
+                    + DEFAULT_BASE_URL + "), ist aber '" + value + "' (Quelle: " + baseUrl.source() + ")");
+        }
     }
 
     public void uploadRunResults(UUID runId, TestExecutionRequest request, int exitCode, TestStatus status) {

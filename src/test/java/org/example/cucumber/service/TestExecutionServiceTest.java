@@ -499,7 +499,7 @@ class TestExecutionServiceTest {
     private TestExecutionService newService(int maxConcurrentRuns, int maxQueueSize) {
         return new TestExecutionService(
                 cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
-                new RunStatusRegistry(24, 500), new AllureReportService(), maxConcurrentRuns, maxQueueSize, "");
+                new RunStatusRegistry(24, 500), new AllureReportService(), maxConcurrentRuns, maxQueueSize);
     }
 
     @Test
@@ -553,63 +553,58 @@ class TestExecutionServiceTest {
         }
     }
 
-    // --- S2: Allowlist für Request-Overrides ---
+    // --- Request-Overrides: alles außer JVM-/Framework-Präfixen ---
 
     @Test
-    void filterOverrides_OnlyAllowlistedKeysPass() {
+    void filterOverrides_PassesApplicationKeys() {
         Map<String, String> requested = new java.util.LinkedHashMap<>();
         requested.put("TEST_ENV", "qa");
-        requested.put("apiURL", "https://evil.example");
-        requested.put("playwright.download.host", "http://evil.example");
-        requested.put("javax.net.ssl.trustStore", "/tmp/evil.jks");
+        requested.put("serviceUrl", "https://service.example");
+        requested.put("apiURL", "https://api.example");
 
-        Map<String, String> result = TestExecutionService.filterOverrides(requested, java.util.Set.of("TEST_ENV"));
+        Map<String, String> result = TestExecutionService.filterOverrides(requested);
 
-        assertEquals(Map.of("TEST_ENV", "qa"), result);
+        assertEquals(requested, result);
     }
 
     @Test
-    void filterOverrides_EmptyAllowlistBlocksEverything() {
-        assertTrue(TestExecutionService.filterOverrides(Map.of("TEST_ENV", "qa"), java.util.Set.of()).isEmpty());
+    void filterOverrides_BlocksJvmAndFrameworkPrefixes_CaseInsensitive() {
+        Map<String, String> requested = new java.util.LinkedHashMap<>();
+        requested.put("java.io.tmpdir", "/tmp/x");
+        requested.put("Spring.profiles.active", "prod");
+        requested.put("server.port", "1");
+        requested.put("user.home", "/x");
+        requested.put("baseUrl", "https://app.example/");
+
+        Map<String, String> result = TestExecutionService.filterOverrides(requested);
+
+        assertEquals(Map.of("baseUrl", "https://app.example/"), result);
     }
 
     @Test
     void filterOverrides_NullMapAndNullEntriesAreIgnored() {
-        assertTrue(TestExecutionService.filterOverrides(null, java.util.Set.of("a")).isEmpty());
+        assertTrue(TestExecutionService.filterOverrides(null).isEmpty());
         Map<String, String> withNull = new java.util.HashMap<>();
         withNull.put("a", null);
         withNull.put(null, "x");
-        assertTrue(TestExecutionService.filterOverrides(withNull, java.util.Set.of("a")).isEmpty());
+        assertTrue(TestExecutionService.filterOverrides(withNull).isEmpty());
     }
 
     @Test
-    void filterOverrides_ComparesExactly_NoPrefixOrCaseMatch() {
-        Map<String, String> result = TestExecutionService.filterOverrides(
-                Map.of("test_env", "x", "TEST_ENV.extra", "y"), java.util.Set.of("TEST_ENV"));
-        assertTrue(result.isEmpty());
-    }
-
-    @Test
-    void parseKeys_TrimsAndSkipsBlanks() {
-        assertEquals(java.util.Set.of("a", "b"), TestExecutionService.parseKeys(" a, ,b ,"));
-        assertTrue(TestExecutionService.parseKeys("").isEmpty());
-        assertTrue(TestExecutionService.parseKeys(null).isEmpty());
-    }
-
-    @Test
-    void queueTestExecution_NotAllowlistedEnvVar_IsNotSetDuringRun() throws Exception {
+    void queueTestExecution_EnvVar_IsSetDuringRunAndRestoredAfterwards() throws Exception {
         java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>("unset");
         when(cucumberRunnerService.run(anyString(), any(), any())).thenAnswer(inv -> {
-            seen.set(String.valueOf(System.getProperty("apiURL")));
+            seen.set(String.valueOf(System.getProperty("serviceUrl")));
             return new CucumberRunnerService.RunResult(inv.getArgument(0), "@smoke", 0, "/tmp");
         });
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
-        request.setEnvironmentVariables(Map.of("apiURL", "https://evil.example"));
+        request.setEnvironmentVariables(Map.of("serviceUrl", "https://service.example"));
 
         UUID runId = testExecutionService.queueTestExecution(request).getRunId();
         awaitStatus(runId, RunState.COMPLETED);
 
-        assertEquals("null", seen.get(), "apiURL darf ohne Allowlist-Eintrag nicht gesetzt werden");
+        assertEquals("https://service.example", seen.get());
+        assertNull(System.getProperty("serviceUrl"), "Override darf nicht in Folge-Läufe durchsickern");
     }
 
     // --- P4: Szenario-Erkennung (englisch + deutsch) ---

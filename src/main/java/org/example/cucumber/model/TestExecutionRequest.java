@@ -78,8 +78,8 @@ public class TestExecutionRequest {
     private Boolean headless = true;
 
     @Size(max = 20, message = "Maximal 20 Umgebungsvariablen")
-    @Schema(description = "Laufzeit-Overrides; nur Keys aus test.execution.allowed-override-keys "
-            + "werden übernommen, alle anderen ignoriert")
+    @Schema(description = "Laufzeit-Overrides als System-Properties; JVM-/Framework-Präfixe "
+            + "(java., sun., os., user., spring., management., server.) werden ignoriert")
     private Map<String, String> environmentVariables;
 
     @Pattern(regexp = PROJECT_KEY_PATTERN, message = "Ungültiger Jira-Projektschlüssel")

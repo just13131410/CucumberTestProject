@@ -18,13 +18,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,14 +57,9 @@ public class TestExecutionService {
     /** Begrenzte Warteschlange für echte Backpressure. {@code test.execution.max-queue-size}. */
     private final int maxQueueSize;
 
-    /**
-     * Allowlist der Keys, die ein Request über {@code environmentVariables} für die Dauer eines
-     * Laufs als System-Property setzen darf ({@code test.execution.allowed-override-keys},
-     * kommagetrennt, Default leer = keine). Bewusst keine Denylist: {@code ConfigReader} liest
-     * System-Properties zur Laufzeit, jeder nicht gesperrte Key (z.B. {@code apiURL},
-     * {@code playwright.download.host}) wäre sonst vom Aufrufer überschreibbar.
-     */
-    private final Set<String> allowedOverrideKeys;
+    /** Blockiert die Menge der verbotenen System-Property-Präfixe aus Request-Env-Variablen. */
+    private static final List<String> BLOCKED_PROP_PREFIXES =
+            List.of("java.", "sun.", "os.", "user.", "spring.", "management.", "server.");
 
     /** Gherkin-Schlüsselwörter für Szenarien (englisch + deutsch), nicht für Examples-Tabellen. */
     private static final Pattern SCENARIO_LINE = Pattern.compile(
@@ -91,14 +84,12 @@ public class TestExecutionService {
                                 RunStatusRegistry statusRegistry,
                                 AllureReportService allureReportService,
                                 @Value("${test.execution.max-concurrent-runs:1}") int maxConcurrentRuns,
-                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize,
-                                @Value("${test.execution.allowed-override-keys:}") String allowedOverrideKeys) {
+                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize) {
         this.cucumberRunnerService = cucumberRunnerService;
         this.zephyrScaleService = zephyrScaleService;
         this.persistence = persistence;
         this.statusRegistry = statusRegistry;
         this.allureReportService = allureReportService;
-        this.allowedOverrideKeys = parseKeys(allowedOverrideKeys);
         if (maxConcurrentRuns > 1) {
             log.error("test.execution.max-concurrent-runs={} ignoriert und auf 1 geklemmt: "
                     + "applyRunProperties()/restoreRunProperties() mutieren prozessweite System-Properties "
@@ -126,15 +117,7 @@ public class TestExecutionService {
     public TestExecutionService(CucumberRunnerService cucumberRunnerService,
                                 ZephyrScaleService zephyrScaleService) {
         this(cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
-                new RunStatusRegistry(24, 500), new AllureReportService(), 1, 20, "");
-    }
-
-    static Set<String> parseKeys(String csv) {
-        if (csv == null || csv.isBlank()) return Set.of();
-        return Arrays.stream(csv.split(","))
-                .map(String::trim)
-                .filter(k -> !k.isEmpty())
-                .collect(Collectors.toUnmodifiableSet());
+                new RunStatusRegistry(24, 500), new AllureReportService(), 1, 20);
     }
 
     public TestExecutionResponse queueTestExecution(TestExecutionRequest request) {
@@ -309,7 +292,7 @@ public class TestExecutionService {
      * @return Map key → vorheriger Wert (null-Wert bedeutet: Property war vorher nicht gesetzt)
      */
     private Map<String, String> applyRunProperties(TestExecutionRequest request) {
-        Map<String, String> toSet = filterOverrides(request.getEnvironmentVariables(), allowedOverrideKeys);
+        Map<String, String> toSet = filterOverrides(request.getEnvironmentVariables());
         if (request.getBrowser() != null) {
             toSet.put("browser", request.getBrowser());
         }
@@ -326,16 +309,18 @@ public class TestExecutionService {
     }
 
     /**
-     * Lässt nur Keys aus der Allowlist durch (exakter Vergleich); alles andere wird verworfen und
-     * protokolliert. Null-Keys/-Werte werden ignoriert.
+     * Übernimmt alle Request-Env-Variablen außer JVM-/Framework-Properties
+     * ({@link #BLOCKED_PROP_PREFIXES}, ohne Beachtung der Groß-/Kleinschreibung); verworfene Keys
+     * werden protokolliert. Null-Keys/-Werte werden ignoriert.
      */
-    static Map<String, String> filterOverrides(Map<String, String> requested, Set<String> allowed) {
+    static Map<String, String> filterOverrides(Map<String, String> requested) {
         Map<String, String> result = new LinkedHashMap<>();
         if (requested == null) return result;
         requested.forEach((k, v) -> {
             if (k == null || v == null) return;
-            if (!allowed.contains(k)) {
-                log.warn("Ignoriere nicht freigegebenen Override-Key aus Request: {}", k);
+            String lower = k.toLowerCase();
+            if (BLOCKED_PROP_PREFIXES.stream().anyMatch(lower::startsWith)) {
+                log.warn("Ignoriere nicht erlaubte System-Property aus Request: {}", k);
                 return;
             }
             result.put(k, v);

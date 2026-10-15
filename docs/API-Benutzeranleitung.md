@@ -100,7 +100,7 @@ Content-Type: application/json
 | `features`            | Liste (Strings)  | Nein    | Feature-Dateien relativ zu `features/`, optional mit Zeilennummer: `GUIProjectTests.feature`, `API-Test.feature:12`. Keine absoluten Pfade, kein `..`, max. 50 |
 | `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `chrome`, `firefox`, `webkit` |
 | `headless`            | Boolean          | Nein    | Browser ohne Fenster starten (Standard: `true`)        |
-| `environmentVariables`| Map              | Nein    | Laufzeit-Overrides als System-Properties. Übernommen werden **nur** Keys aus `test.execution.allowed-override-keys` (Standard: keine), alle anderen werden ignoriert und geloggt. Max. 20 Einträge |
+| `environmentVariables`| Map              | Nein    | Laufzeit-Overrides als System-Properties für die Dauer des Laufs (z.B. `baseUrl`, `apiURL`, `todoApiUrl`). Keys mit den Präfixen `java.`, `sun.`, `os.`, `user.`, `spring.`, `management.`, `server.` werden ignoriert und geloggt. Max. 20 Einträge |
 | `projectKey`          | String           | Nein    | Jira/Zephyr-Projekt-Schlüssel (`PROJ`, Großbuchstaben) für diesen Lauf (überschreibt `zephyr.default-project-key`) |
 | `zephyrTemplateTestRunKey` | String      | Nein    | Zephyr-Testrun (`PROJ-C15`, `PROJ-R1`), dessen Testfälle in den neuen Cycle geklont werden (überschreibt `zephyr.template-test-run-key`) - z.B. für einen abweichenden Testfallsatz wie API-Tests |
 | `zephyrResultFolder`  | String           | Nein    | Zephyr-Folder-Pfad für den neuen Cycle (überschreibt `zephyr.result-folder`), max. 255 Zeichen |
@@ -109,11 +109,9 @@ Die früher reservierten, nie ausgewerteten Felder `parallelCount`, `retryFailed
 `timeoutMinutes`, `webhookUrl`, `priority` und `initiator` wurden entfernt. Schicken Clients sie noch
 mit, werden sie ohne Fehler ignoriert.
 
-**Warum `environmentVariables` eine Allowlist hat:** Der Service liest Konfiguration zur Laufzeit auch
-aus System-Properties. Ohne Allowlist könnte ein Aufrufer z.B. `apiURL` umbiegen (der API-Token ginge
-an einen fremden Server) oder Browser-Downloads auf eine fremde Quelle lenken. Zugangsdaten gehören
-nie in den Request, sondern in Secrets/Vault. Freigabe einzelner Keys pro Deployment:
-`TEST_EXECUTION_ALLOWED_OVERRIDE_KEYS=baseUrl,todoApiUrl`.
+**Hinweis zu `environmentVariables`:** Die Werte überschreiben für die Dauer des Laufs die
+Konfiguration (System-Property vor `config.properties`, aber nach echten Umgebungsvariablen des Pods).
+Zugangsdaten gehören nicht in den Request, sondern in Secrets/Vault.
 
 **Beispiel - Smoke Tests starten:**
 ```bash
@@ -169,8 +167,8 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
 ```
 
 Die Ziel-URL der UI-Tests (`baseUrl`) wird pro Deployment gesetzt (Umgebungsvariable `BASEURL`).
-Soll sie pro Lauf änderbar sein, `baseUrl` in `test.execution.allowed-override-keys` freigeben und
-`"environmentVariables": {"baseUrl": "https://meine-app.example.com/"}` mitschicken.
+Pro Lauf lässt sie sich per `"environmentVariables": {"baseUrl": "https://meine-app.example.com/"}`
+überschreiben, sofern im Pod keine Umgebungsvariable `BASEURL` gesetzt ist (die hat Vorrang).
 
 **Response (202 Accepted):**
 ```json

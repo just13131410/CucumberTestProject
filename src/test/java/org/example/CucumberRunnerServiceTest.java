@@ -113,6 +113,42 @@ class CucumberRunnerServiceTest {
     }
 
     @Test
+    void buildSubprocessCommand_ForwardsRunPropertiesBeforeMainClass() {
+        // Regression: Request-Overrides (z.B. serviceUrl) waren nur im Server gesetzt, die Kind-JVM sah null.
+        List<String> cmd = service.buildSubprocessCommand("run-1", "@x", null,
+                java.util.Map.of("serviceUrl", "https://service.example/api"));
+
+        int propIdx = cmd.indexOf("-DserviceUrl=https://service.example/api");
+        assertTrue(propIdx > 0, "Run-Property muss als -D an die Kind-JVM gehen: " + cmd);
+        assertTrue(propIdx < cmd.indexOf("org.example.CucumberRunnerMain"),
+                "-D muss vor der Main-Klasse stehen, sonst wäre es ein Programmargument");
+    }
+
+    @Test
+    void buildSubprocessCommand_RunPropertyOverridesForwardedServerProperty() {
+        System.setProperty("browser", "chromium");
+        try {
+            List<String> cmd = service.buildSubprocessCommand("run-1", "@x", null, java.util.Map.of("browser", "firefox"));
+
+            assertTrue(cmd.lastIndexOf("-Dbrowser=firefox") > cmd.indexOf("-Dbrowser=chromium"),
+                    "Wert des Requests muss als letztes -D stehen (gewinnt in der JVM)");
+        } finally {
+            System.clearProperty("browser");
+        }
+    }
+
+    @Test
+    void buildSubprocessCommand_SkipsNullAndBlankRunProperties() {
+        java.util.Map<String, String> props = new java.util.HashMap<>();
+        props.put("a", null);
+        props.put(" ", "x");
+
+        List<String> cmd = service.buildSubprocessCommand("run-1", "@x", null, props);
+
+        assertTrue(cmd.stream().noneMatch(arg -> arg.startsWith("-Da=") || arg.startsWith("-D =")), cmd.toString());
+    }
+
+    @Test
     void buildSubprocessCommand_ForwardsTestResultsPathSystemProperty() {
         System.setProperty("test.results.path", "custom-results-dir");
         try {

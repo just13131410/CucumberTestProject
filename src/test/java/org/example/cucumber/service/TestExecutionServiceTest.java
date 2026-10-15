@@ -138,7 +138,7 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_SuccessfulRun_StatusCompleted() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "target/runs/id"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
@@ -155,7 +155,7 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_FailedExitCode_StatusFailed() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 1, "target/runs/id"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
@@ -171,7 +171,7 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_ExceptionThrown_StatusFailed() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenThrow(new RuntimeException("Cucumber crashed"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
@@ -210,7 +210,7 @@ class TestExecutionServiceTest {
     void getActiveTests_ReturnsOnlyActiveStatuses() throws Exception {
         // Make the run block so it stays in RUNNING state
         CountDownLatch blockLatch = new CountDownLatch(1);
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenAnswer(invocation -> {
                     blockLatch.await(5, TimeUnit.SECONDS);
                     return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -241,7 +241,7 @@ class TestExecutionServiceTest {
     @Test
     void cancelTestExecution_RunningTest_CancelsSuccessfully() throws Exception {
         CountDownLatch blockLatch = new CountDownLatch(1);
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenAnswer(invocation -> {
                     blockLatch.await(10, TimeUnit.SECONDS);
                     return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -276,7 +276,7 @@ class TestExecutionServiceTest {
 
     @Test
     void deleteTestExecution_CompletedRun_ReturnsTrue() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "target/runs/id"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
@@ -292,7 +292,7 @@ class TestExecutionServiceTest {
     @Test
     void deleteTestExecution_RunningTest_ReturnsFalse() throws Exception {
         CountDownLatch blockLatch = new CountDownLatch(1);
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenAnswer(invocation -> {
                     blockLatch.await(10, TimeUnit.SECONDS);
                     return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -334,7 +334,7 @@ class TestExecutionServiceTest {
 
     @Test
     void getStatistics_WithEnvironmentFilter_FiltersByEnvironment() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
 
         testExecutionService.queueTestExecution(createRequest("dev", List.of("@smoke")));
@@ -396,7 +396,7 @@ class TestExecutionServiceTest {
     @ParameterizedTest(name = "tags={0} -> accessibility present={1}")
     @MethodSource("accessibilityUrlCases")
     void execution_TagsDetermineAccessibilityUrlPresence(List<String> tags, boolean expectPresent) throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", tags.get(0), 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", tags);
@@ -422,7 +422,7 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_FrontendTag_AccessibilityUrlPointsToAxeResult() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@Frontend", 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@Frontend"));
@@ -439,7 +439,7 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_CompletedRun_AllReportUrlsUseReportsPrefix() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
@@ -479,7 +479,7 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_CompletedRun_DurationFormattedAsMinSec() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
@@ -532,7 +532,7 @@ class TestExecutionServiceTest {
         TestExecutionService svc = newService(1, 1);
         try {
             CountDownLatch block = new CountDownLatch(1);
-            when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+            when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                     .thenAnswer(inv -> {
                         block.await(10, TimeUnit.SECONDS);
                         return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -593,7 +593,7 @@ class TestExecutionServiceTest {
     @Test
     void queueTestExecution_EnvVar_IsSetDuringRunAndRestoredAfterwards() throws Exception {
         java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>("unset");
-        when(cucumberRunnerService.run(anyString(), any(), any())).thenAnswer(inv -> {
+        when(cucumberRunnerService.run(anyString(), any(), any(), anyMap())).thenAnswer(inv -> {
             seen.set(String.valueOf(System.getProperty("serviceUrl")));
             return new CucumberRunnerService.RunResult(inv.getArgument(0), "@smoke", 0, "/tmp");
         });

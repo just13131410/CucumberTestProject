@@ -179,7 +179,9 @@ public class TestExecutionService {
             running.setCurrentPhase("EXECUTING");
 
             // Run-spezifische System-Properties setzen; vorherige Werte für sauberes Restore merken.
-            Map<String, String> previousProps = applyRunProperties(request);
+            // Dieselben Werte gehen im Subprozess-Modus explizit als -D an die Kind-JVM.
+            Map<String, String> runProperties = runProperties(request);
+            Map<String, String> previousProps = applyRunProperties(runProperties);
 
             // Count expected scenarios for progress tracking (best-effort, tag-unaware)
             int totalScenarios = scenarioCount();
@@ -208,7 +210,7 @@ public class TestExecutionService {
 
             CucumberRunnerService.RunResult result;
             try {
-                result = cucumberRunnerService.run(runId.toString(), tags, features);
+                result = cucumberRunnerService.run(runId.toString(), tags, features, runProperties);
             } finally {
                 progressTracker.shutdownNow();
                 // Properties nicht in Folge-Runs durchsickern lassen.
@@ -284,14 +286,10 @@ public class TestExecutionService {
     }
 
     /**
-     * Setzt run-spezifische System-Properties (Browser, Headless, whitelisted Request-Env-Variablen)
-     * und liefert einen Snapshot der vorherigen Werte für {@link #restoreRunProperties}. Verhindert,
-     * dass Properties eines Laufs in Folge-Läufe durchsickern (globaler Zustand). Sensible
-     * JVM-/Framework-Präfixe werden abgelehnt.
-     *
-     * @return Map key → vorheriger Wert (null-Wert bedeutet: Property war vorher nicht gesetzt)
+     * Run-spezifische Properties eines Requests: gefilterte Env-Variablen ({@link #filterOverrides})
+     * plus Browser und Headless.
      */
-    private Map<String, String> applyRunProperties(TestExecutionRequest request) {
+    static Map<String, String> runProperties(TestExecutionRequest request) {
         Map<String, String> toSet = filterOverrides(request.getEnvironmentVariables());
         if (request.getBrowser() != null) {
             toSet.put("browser", request.getBrowser());
@@ -299,7 +297,17 @@ public class TestExecutionService {
         if (request.getHeadless() != null) {
             toSet.put("browser.headless", request.getHeadless().toString());
         }
+        return toSet;
+    }
 
+    /**
+     * Setzt die run-spezifischen Properties als System-Properties und liefert einen Snapshot der
+     * vorherigen Werte für {@link #restoreRunProperties}. Verhindert, dass Properties eines Laufs in
+     * Folge-Läufe durchsickern (globaler Zustand).
+     *
+     * @return Map key → vorheriger Wert (null-Wert bedeutet: Property war vorher nicht gesetzt)
+     */
+    private Map<String, String> applyRunProperties(Map<String, String> toSet) {
         Map<String, String> previous = new HashMap<>();
         toSet.forEach((k, v) -> {
             previous.put(k, System.getProperty(k)); // kann null sein

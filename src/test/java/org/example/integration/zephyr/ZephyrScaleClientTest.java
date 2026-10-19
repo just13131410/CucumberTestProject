@@ -121,6 +121,16 @@ class ZephyrScaleClientTest {
     }
 
     @Test
+    void getTestRun_PathInjectionKey_ReturnsNullWithoutHttpCall() {
+        // Keine Erwartung am MockServer: jeder Request würde mit "No further requests expected" scheitern.
+        for (String bad : List.of("../../api/2/myself", "PROJ-R1/../../x", "PROJ-R1?expand=all", "proj-r1", "")) {
+            assertNull(zephyrClient.getTestRun(bad), bad);
+        }
+        assertNull(zephyrClient.getTestRun(null));
+        mockServer.verify();
+    }
+
+    @Test
     void getTestRun_NotFound_ReturnsNull() {
         mockServer.expect(requestTo(BASE_URL + "/rest/atm/1.0/testrun/PROJ-R404"))
                 .andExpect(method(HttpMethod.GET))

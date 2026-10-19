@@ -98,6 +98,9 @@ public class ConfigReader {
      *   <li>config.properties (Classpath-Fallback)</li>
      *   <li>Default-Wert</li>
      * </ol>
+     * Leere bzw. nur aus Whitespace bestehende Werte gelten als nicht gesetzt, es greift die nächste
+     * Quelle. Sonst würde z.B. ein leer angelegtes {@code ZEPHYR_BASE_URL} aus ConfigMap/Secret den
+     * Default überdecken und erst beim ersten HTTP-Call als {@code URI is not absolute} auffallen.
      */
     public static String get(String key, String defaultValue) {
         return getWithSource(key, defaultValue).value();
@@ -114,37 +117,41 @@ public class ConfigReader {
         String envKey = toEnvKey(key);
 
         String envValue = System.getenv(envKey);
-        if (envValue != null) {
+        if (isSet(envValue)) {
             log.debug("Key '{}' bezogen aus: Umgebungsvariable ({})", key, envKey);
             return new ResolvedValue(trim(envValue), "Umgebungsvariable (" + envKey + ")");
         }
 
         String sysProp = System.getProperty(key);
-        if (sysProp != null) {
+        if (isSet(sysProp)) {
             log.debug("Key '{}' bezogen aus: System-Property (-D{})", key, key);
             return new ResolvedValue(trim(sysProp), "System-Property (-D" + key + ")");
         }
 
         String dotenvValue = dotenv.get(envKey, null);
-        if (dotenvValue != null) {
+        if (isSet(dotenvValue)) {
             log.debug("Key '{}' bezogen aus: .env-Datei", key);
             return new ResolvedValue(trim(dotenvValue), ".env-Datei");
         }
 
         String secretValue = secretProperties.getProperty(key);
-        if (secretValue != null) {
+        if (isSet(secretValue)) {
             log.debug("Key '{}' bezogen aus: Secret-Datei (CONFIGPATH)", key);
             return new ResolvedValue(trim(secretValue), "Secret-Datei (CONFIGPATH)");
         }
 
         String propValue = properties.getProperty(key);
-        if (propValue != null) {
+        if (isSet(propValue)) {
             log.debug("Key '{}' bezogen aus: config.properties (Classpath)", key);
             return new ResolvedValue(trim(propValue), "config.properties (Classpath)");
         }
 
         log.debug("Key '{}' nicht gefunden – verwende Default: '{}'", key, defaultValue);
         return new ResolvedValue(defaultValue, "Default");
+    }
+
+    private static boolean isSet(String value) {
+        return value != null && !value.isBlank();
     }
 
     /**

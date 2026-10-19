@@ -1,6 +1,9 @@
 package org.example.hooks;
 
 import io.cucumber.java.Scenario;
+import org.example.App;
+import org.example.cucumber.service.StartupReconciler;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,6 +46,18 @@ class CucumberHooksTest {
         Field f = CucumberHooks.class.getDeclaredField("scenarioStartTime");
         f.setAccessible(true);
         return (ThreadLocal<LocalDateTime>) f.get(hooks);
+    }
+
+    // --- Spring-Kontext der Glue-Klassen ---
+
+    @Test
+    void springContext_FullAppWithoutWebServerAndStartupTasks() {
+        SpringBootTest annotation = CucumberHooks.class.getAnnotation(SpringBootTest.class);
+
+        assertArrayEquals(new Class<?>[]{App.class}, annotation.classes());
+        assertEquals(SpringBootTest.WebEnvironment.NONE, annotation.webEnvironment());
+        assertTrue(List.of(annotation.properties()).contains(StartupReconciler.STARTUP_TASKS_ENABLED + "=false"),
+                "Ohne die Property markiert der zweite App-Start den laufenden Lauf als INTERRUPTED");
     }
 
     // --- beforeScenario ---

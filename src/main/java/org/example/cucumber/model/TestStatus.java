@@ -13,7 +13,11 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Status-Model fuer laufende Tests
+ * Status-Model fuer laufende Tests.
+ * <p>
+ * Instanzen werden von mehreren Threads geteilt (Ausführung, Fortschritts-Tracker,
+ * Report-Executor, HTTP-Requests). Die veränderlichen Felder sind deshalb {@code volatile}
+ * (Sichtbarkeit); zusammengesetzte Updates laufen über {@code RunStatusRegistry}.
  */
 @Data
 @Builder
@@ -26,24 +30,23 @@ public class TestStatus {
     @Schema(description = "Run ID")
     private UUID runId;
 
-    @Schema(description = "Status",
-            allowableValues = {"QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"})
-    private String status;
+    @Schema(description = "Status")
+    private volatile RunState status;
 
     @Schema(description = "Umgebung")
     private String environment;
 
     @Schema(description = "Fortschritt in Prozent (0-100)")
-    private Integer progress;
+    private volatile Integer progress;
 
     @Schema(description = "Startzeit")
-    private LocalDateTime startTime;
+    private volatile LocalDateTime startTime;
 
     @Schema(description = "Endzeit")
-    private LocalDateTime endTime;
+    private volatile LocalDateTime endTime;
 
     @Schema(description = "Dauer (mm:ss)")
-    private String duration;
+    private volatile String duration;
 
     @Schema(description = "Anzahl Tests gesamt")
     private Integer totalTests;
@@ -58,7 +61,7 @@ public class TestStatus {
     private Integer skippedTests;
 
     @Schema(description = "Aktuelle Phase")
-    private String currentPhase;
+    private volatile String currentPhase;
 
     @Schema(description = "Aktuelle Feature-Datei")
     private String currentFeature;
@@ -70,16 +73,16 @@ public class TestStatus {
     private String nodeName;
 
     @Schema(description = "Fehlermeldung (bei Fehler)")
-    private String errorMessage;
+    private volatile String errorMessage;
 
     @Schema(description = "Jira Bug-Ticket-Key bei fehlgeschlagenen Runs (z.B. PROJ-42)")
-    private String jiraTicketKey;
+    private volatile String jiraTicketKey;
 
     @Schema(description = "Report-URLs")
-    private Map<String, String> reportUrls;
+    private volatile Map<String, String> reportUrls;
 
     @Schema(description = "Metadata")
-    private Map<String, Object> metadata;
+    private volatile Map<String, Object> metadata;
 
     @JsonIgnore
     public double getSuccessRate() {

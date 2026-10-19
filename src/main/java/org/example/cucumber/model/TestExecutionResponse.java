@@ -27,7 +27,7 @@ public class TestExecutionResponse {
 
     @Schema(description = "Aktueller Status",
             example = "QUEUED")
-    private String status;
+    private RunState status;
 
     @Schema(description = "Umgebung",
             example = "dev")

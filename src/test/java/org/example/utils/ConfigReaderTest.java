@@ -146,6 +146,33 @@ class ConfigReaderTest {
         assertEquals("  default  ", result);
     }
 
+    // --- Leere Werte gelten als nicht gesetzt ---
+
+    @Test
+    void get_BlankSystemProperty_FallsThroughToPropertiesFile() {
+        // Regression: ein leer angelegter Wert (z.B. ZEPHYR_BASE_URL="" aus ConfigMap) überdeckte
+        // die nachgelagerten Quellen und führte zu "URI is not absolute".
+        System.setProperty("baseUrl", "   ");
+
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("baseUrl", "default");
+
+        assertEquals("config.properties (Classpath)", result.source());
+        assertTrue(result.value().startsWith("http"));
+    }
+
+    @Test
+    void get_EmptySystemProperty_FallsBackToDefault() {
+        System.setProperty("testKey", "");
+
+        assertEquals("default", ConfigReader.get("testKey", "default"));
+    }
+
+    @Test
+    void get_EmptyValueInPropertiesFile_FallsBackToDefault() {
+        // playwright.remote.endpoint ist in config.properties leer eingetragen
+        assertEquals("fallback", ConfigReader.get("playwright.remote.endpoint", "fallback"));
+    }
+
     // --- getWithSource Tests ---
 
     @Test

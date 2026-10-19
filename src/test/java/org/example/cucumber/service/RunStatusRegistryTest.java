@@ -1,5 +1,6 @@
 package org.example.cucumber.service;
 
+import org.example.cucumber.model.RunState;
 import org.example.cucumber.model.TestStatus;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +17,7 @@ class RunStatusRegistryTest {
         RunStatusRegistry registry = new RunStatusRegistry(0, 2);
         for (int i = 0; i < 4; i++) {
             UUID id = UUID.randomUUID();
-            registry.put(id, TestStatus.builder().runId(id).status("COMPLETED")
+            registry.put(id, TestStatus.builder().runId(id).status(RunState.COMPLETED)
                     .endTime(LocalDateTime.now().minusMinutes(i)).build());
         }
 
@@ -30,13 +31,13 @@ class RunStatusRegistryTest {
     void evictOldStatuses_TTL_RemovesExpiredButKeepsFreshAndRunning() {
         RunStatusRegistry registry = new RunStatusRegistry(1, 500);
         UUID oldId = UUID.randomUUID();
-        registry.put(oldId, TestStatus.builder().runId(oldId).status("COMPLETED")
+        registry.put(oldId, TestStatus.builder().runId(oldId).status(RunState.COMPLETED)
                 .endTime(LocalDateTime.now().minusHours(2)).build());
         UUID freshId = UUID.randomUUID();
-        registry.put(freshId, TestStatus.builder().runId(freshId).status("COMPLETED")
+        registry.put(freshId, TestStatus.builder().runId(freshId).status(RunState.COMPLETED)
                 .endTime(LocalDateTime.now()).build());
         UUID runningId = UUID.randomUUID();
-        registry.put(runningId, TestStatus.builder().runId(runningId).status("RUNNING").build());
+        registry.put(runningId, TestStatus.builder().runId(runningId).status(RunState.RUNNING).build());
 
         registry.evictOldStatuses();
 
@@ -49,11 +50,11 @@ class RunStatusRegistryTest {
     void getActiveTests_ReturnsOnlyQueuedAndRunning() {
         RunStatusRegistry registry = new RunStatusRegistry(24, 500);
         UUID queuedId = UUID.randomUUID();
-        registry.put(queuedId, TestStatus.builder().runId(queuedId).status("QUEUED").build());
+        registry.put(queuedId, TestStatus.builder().runId(queuedId).status(RunState.QUEUED).build());
         UUID runningId = UUID.randomUUID();
-        registry.put(runningId, TestStatus.builder().runId(runningId).status("RUNNING").build());
+        registry.put(runningId, TestStatus.builder().runId(runningId).status(RunState.RUNNING).build());
         UUID completedId = UUID.randomUUID();
-        registry.put(completedId, TestStatus.builder().runId(completedId).status("COMPLETED").build());
+        registry.put(completedId, TestStatus.builder().runId(completedId).status(RunState.COMPLETED).build());
 
         var active = registry.getActiveTests();
 
@@ -66,42 +67,56 @@ class RunStatusRegistryTest {
     void updateStatus_SetsStatusAndOptionalErrorMessage() {
         RunStatusRegistry registry = new RunStatusRegistry(24, 500);
         UUID id = UUID.randomUUID();
-        registry.put(id, TestStatus.builder().runId(id).status("RUNNING").build());
+        registry.put(id, TestStatus.builder().runId(id).status(RunState.RUNNING).build());
 
-        registry.updateStatus(id, "FAILED", "boom");
+        registry.updateStatus(id, RunState.FAILED, "boom");
 
         TestStatus status = registry.get(id);
-        assertEquals("FAILED", status.getStatus());
+        assertEquals(RunState.FAILED, status.getStatus());
         assertEquals("boom", status.getErrorMessage());
+    }
+
+    @Test
+    void updateStatus_TerminalStatusIsFinal_CancelledNotOverwrittenByFailed() {
+        RunStatusRegistry registry = new RunStatusRegistry(24, 500);
+        UUID id = UUID.randomUUID();
+        registry.put(id, TestStatus.builder().runId(id).status(RunState.RUNNING).build());
+
+        assertTrue(registry.updateStatus(id, RunState.CANCELLED, "Cancelled by user"));
+        assertFalse(registry.updateStatus(id, RunState.FAILED, "InterruptedException"));
+
+        TestStatus status = registry.get(id);
+        assertEquals(RunState.CANCELLED, status.getStatus());
+        assertEquals("Cancelled by user", status.getErrorMessage());
     }
 
     @Test
     void updateStatus_UnknownRunId_DoesNotThrow() {
         RunStatusRegistry registry = new RunStatusRegistry(24, 500);
-        assertDoesNotThrow(() -> registry.updateStatus(UUID.randomUUID(), "FAILED", "boom"));
+        assertDoesNotThrow(() -> registry.updateStatus(UUID.randomUUID(), RunState.FAILED, "boom"));
     }
 
     @Test
     void isTerminal_TerminalStatuses_ReturnsTrue() {
-        assertTrue(RunStatusRegistry.isTerminal("COMPLETED"));
-        assertTrue(RunStatusRegistry.isTerminal("FAILED"));
-        assertTrue(RunStatusRegistry.isTerminal("CANCELLED"));
-        assertTrue(RunStatusRegistry.isTerminal("INTERRUPTED"));
+        assertTrue(RunStatusRegistry.isTerminal(RunState.COMPLETED));
+        assertTrue(RunStatusRegistry.isTerminal(RunState.FAILED));
+        assertTrue(RunStatusRegistry.isTerminal(RunState.CANCELLED));
+        assertTrue(RunStatusRegistry.isTerminal(RunState.INTERRUPTED));
     }
 
     @Test
     void isTerminal_NonTerminalStatuses_ReturnsFalse() {
-        assertFalse(RunStatusRegistry.isTerminal("QUEUED"));
-        assertFalse(RunStatusRegistry.isTerminal("RUNNING"));
+        assertFalse(RunStatusRegistry.isTerminal(RunState.QUEUED));
+        assertFalse(RunStatusRegistry.isTerminal(RunState.RUNNING));
     }
 
     @Test
     void getStatistics_FiltersByEnvironment() {
         RunStatusRegistry registry = new RunStatusRegistry(24, 500);
         UUID devId = UUID.randomUUID();
-        registry.put(devId, TestStatus.builder().runId(devId).status("COMPLETED").environment("dev").build());
+        registry.put(devId, TestStatus.builder().runId(devId).status(RunState.COMPLETED).environment("dev").build());
         UUID stagingId = UUID.randomUUID();
-        registry.put(stagingId, TestStatus.builder().runId(stagingId).status("COMPLETED").environment("staging").build());
+        registry.put(stagingId, TestStatus.builder().runId(stagingId).status(RunState.COMPLETED).environment("staging").build());
 
         var devStats = registry.getStatistics("dev");
 

@@ -113,8 +113,10 @@ Betrifft `k8s/20-app.yaml`.
    -XX:MaxMetaspaceSize=384m -XX:ReservedCodeCacheSize=256m -XX:MaxDirectMemorySize=256m
    -Xss512k -XX:+UseG1GC -XX:G1PeriodicGCInterval=30000
    -XX:ParallelGCThreads=2 -XX:ConcGCThreads=1
-   -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/test-results/dumps
+   -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps
    ```
+   `/dumps` ist ein eigenes Volume: Heap-Dumps enthalten Secrets und dürfen nicht unter
+   `/app/test-results` liegen, das per `/reports/**` ausgeliefert wird.
    Budget: 640+384+256+256+~68(Stacks)+~80(GC) ≈ **1684 Mi < 2048 Mi**. Die Meta-/Direct-Caps
    wandeln stilles RSS-Kriechen in einen fangbaren `OutOfMemoryError` → `ExitOnOutOfMemoryError`
    macht daraus einen sauberen, schnellen Restart statt eines hängenden Pods.

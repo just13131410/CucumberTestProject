@@ -7,37 +7,56 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.microsoft.playwright.Page;
 import io.qameta.allure.Allure;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.example.cucumber.context.TestContext;
 import org.example.utils.ConfigReader;
 
 import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
+import java.util.NavigableMap;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 
 public class AxeReportHook {
+    private static final Logger log = LoggerFactory.getLogger(AxeReportHook.class);
+
     private static final ObjectMapper mapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
 
     /**
-     * Tracks already-scanned URLs per output directory (= per run).
-     * Key: absolute path of the axe result directory (unique per run).
-     * Value: set of page URLs already scanned in that run.
-     * Prevents duplicate axe scans when multiple scenarios visit the same page.
+     * Zustand pro Run (Key: absoluter Pfad des Axe-Ergebnisverzeichnisses, eindeutig pro Run).
+     * Bewusst statisch, weil die Step-Definitionen den Hook statisch aufrufen; der Eintrag wird am
+     * Laufende per {@link #forgetRun(Path)} entfernt, damit die Map im Dauerbetrieb nicht wächst.
      */
-    private static final ConcurrentHashMap<String, Set<String>> scannedUrlsByRun =
-            new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, RunScans> runs = new ConcurrentHashMap<>();
+
+    /** Bereits gescannte URLs (verhindert doppelte Scans) und Zusammenfassungen für die index.html. */
+    static final class RunScans {
+        final Set<String> scannedUrls = ConcurrentHashMap.newKeySet();
+        /** Sortiert nach Dateiname, wie zuvor die Dateiliste; Zugriff nur unter {@code synchronized (this)}. */
+        final NavigableMap<String, ScanSummary> summaries = new TreeMap<>();
+    }
+
+    /** Entfernt den Zustand eines Runs; Aufruf am Laufende (CucumberInvoker). */
+    public static void forgetRun(Path reportDir) {
+        runs.remove(reportDir.toAbsolutePath().toString());
+    }
+
+    /** Anzahl der Runs mit gehaltenem Zustand (für Tests). */
+    static int trackedRuns() {
+        return runs.size();
+    }
 
     /**
      * Gemeinsames Basis-CSS für {@link #generateIndexHtml} und {@link #generateSimpleHtml}
@@ -97,6 +116,68 @@ public class AxeReportHook {
                     .skip-link:focus { top: 0; }
             """;
 
+    /** CSS der Verstoß-Karten, gemeinsam für Einzelbericht und index.html. */
+    private static final String VIOLATION_CSS = """
+                    .violation-card {
+                        background: white; border: 1px solid #e0e0e0; border-left: 4px solid;
+                        border-radius: 6px; padding: 20px; margin-bottom: 20px;
+                        transition: box-shadow 0.3s ease;
+                    }
+                    .violation-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+                    .violation-card.critical { border-left-color: #721c24; background: #f8d7da; }
+                    .violation-card.serious  { border-left-color: #dc3545; background: #fff5f5; }
+                    .violation-card.moderate  { border-left-color: #ffc107; background: #fff9e6; }
+                    .violation-card.minor     { border-left-color: #17a2b8; background: #e7f7f9; }
+
+                    .violation-header {
+                        display: flex; align-items: center; justify-content: space-between;
+                        margin-bottom: 15px; flex-wrap: wrap; gap: 10px;
+                    }
+                    .violation-title { font-size: 1.2rem; font-weight: 600; color: #333; flex: 1; }
+
+                    .impact-badge {
+                        display: inline-block; padding: 5px 15px; border-radius: 20px;
+                        font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+                    }
+                    .impact-badge.critical { background: #721c24; color: white; }
+                    .impact-badge.serious  { background: #dc3545; color: white; }
+                    .impact-badge.moderate { background: #ffc107; color: #333; }
+                    .impact-badge.minor    { background: #17a2b8; color: white; }
+
+                    .violation-description { margin-bottom: 15px; color: #555; line-height: 1.6; }
+
+                    .violation-id {
+                        font-family: 'Courier New', monospace; background: #f5f5f5;
+                        padding: 2px 8px; border-radius: 4px; font-size: 0.85rem;
+                        color: #666; display: inline-block; margin-bottom: 10px;
+                    }
+
+                    .violation-nodes { background: #f8f9fa; border-radius: 4px; padding: 15px; margin-top: 15px; }
+                    .violation-nodes summary { cursor: pointer; font-weight: 600; color: #667eea; padding: 5px; user-select: none; }
+                    .violation-nodes summary:hover { color: #764ba2; }
+                    .violation-nodes summary:focus { outline: 2px solid #667eea; outline-offset: 2px; }
+
+                    .node-item { background: white; border-left: 3px solid #667eea; padding: 10px; margin: 10px 0; border-radius: 4px; }
+                    .node-target { font-family: 'Courier New', monospace; color: #d73a49; font-size: 0.9rem; margin-bottom: 8px; }
+                    .node-html {
+                        font-family: 'Courier New', monospace; background: #f6f8fa; padding: 10px;
+                        border-radius: 4px; overflow-x: auto; font-size: 0.85rem; color: #24292e; margin-top: 8px;
+                    }
+
+                    .help-link {
+                        display: inline-block; margin-top: 10px; padding: 10px 20px;
+                        background: #667eea; color: white; text-decoration: none;
+                        border-radius: 5px; font-weight: 500; transition: background 0.3s ease;
+                    }
+                    .help-link:hover { background: #764ba2; }
+                    .help-link:focus { outline: 3px solid #667eea; outline-offset: 2px; }
+
+                    .no-violations { text-align: center; padding: 60px 20px; color: #28a745; }
+                    .no-violations svg { width: 80px; height: 80px; margin-bottom: 20px; }
+                    .no-violations h2 { font-size: 1.8rem; margin-bottom: 10px; }
+
+            """;
+
     /**
      * Resolves the axe report output directory.
      * Uses per-run isolation if TestContext is active, falls back to config/default.
@@ -118,9 +199,9 @@ public class AxeReportHook {
         String runKey  = reportDir.toAbsolutePath().toString();
         String pageUrl = page.url();
 
-        Set<String> scanned = scannedUrlsByRun.computeIfAbsent(runKey, k -> ConcurrentHashMap.newKeySet());
-        if (!scanned.add(pageUrl)) {
-            System.out.println("Axe-Scan uebersprungen (URL bereits gescannt in diesem Run): " + pageUrl);
+        RunScans run = runs.computeIfAbsent(runKey, k -> new RunScans());
+        if (!run.scannedUrls.add(pageUrl)) {
+            log.info("Axe-Scan übersprungen (URL bereits gescannt in diesem Run): {}", pageUrl);
             return;
         }
 
@@ -134,12 +215,18 @@ public class AxeReportHook {
             // Stabile Benennung: JSON und HTML teilen sich den gleichen Basisnamen
             String baseName = fileName + "_" + System.currentTimeMillis();
 
-            mapper.writeValue(new File(reportDir.resolve(baseName + ".json").toString()), results);
+            // Einmal serialisieren und für Datei, Index-Zusammenfassung und Allure-Anhang wiederverwenden
             String jsonString = mapper.writeValueAsString(results);
-            System.out.println("Axe-Report generiert: " + baseName + ".json");
+            Files.writeString(reportDir.resolve(baseName + ".json"), jsonString);
+            log.info("Axe-Report generiert: {}.json", baseName);
 
-            generateSimpleHtml(results, baseName, reportDir);
-            generateIndexHtml(reportDir);
+            // Inkrementell statt bei jedem Scan alle bisherigen JSON-Dateien neu zu parsen
+            ScanSummary summary = summarize(mapper.readTree(jsonString), baseName, baseName + ".html");
+            generateSimpleHtml(summary, baseName, reportDir);
+            synchronized (run) {
+                run.summaries.put(baseName, summary);
+                generateIndexHtml(reportDir, new ArrayList<>(run.summaries.values()));
+            }
 
             Allure.addAttachment(
                     "Accessibility Scan - " + fileName,
@@ -148,7 +235,7 @@ public class AxeReportHook {
                     ".json"
             );
         } catch (IOException e) {
-            System.err.println("Fehler beim Schreiben des JSON-Reports: " + e.getMessage());
+            log.error("Fehler beim Schreiben des Axe-Reports {}: {}", fileName, e.getMessage());
         }
     }
 
@@ -157,11 +244,12 @@ public class AxeReportHook {
     // ───────────────────────────────────────────────
 
     /**
-     * Liest alle JSON-Dateien im Report-Verzeichnis ein und erzeugt eine
-     * index.html mit Gesamtstatistik und Verlinkung zu den Einzelberichten.
+     * Erzeugt die index.html mit Gesamtstatistik, Tabelle und den Verstößen jeder Seite.
+     * Die Tabelle verlinkt per Sprungmarke auf die Abschnitte derselben Datei, damit die Übersicht
+     * auch allein funktioniert (Zephyr-Anhang, heruntergeladene Datei); Einzelberichte sind optional.
+     * Atomar ersetzt, damit ein paralleler Leser nie eine halb geschriebene Seite sieht.
      */
-    static void generateIndexHtml(Path reportDir) throws IOException {
-        List<ScanSummary> scans = collectScans(reportDir);
+    static void generateIndexHtml(Path reportDir, List<ScanSummary> scans) throws IOException {
 
         int totalViolations = scans.stream().mapToInt(s -> s.violations).sum();
         int totalPasses = scans.stream().mapToInt(s -> s.passes).sum();
@@ -179,7 +267,16 @@ public class AxeReportHook {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Barrierefreiheit – Testrun-Übersicht</title>
                 <style>
-            """).append(BASE_REPORT_CSS).append("""
+            """).append(BASE_REPORT_CSS).append(VIOLATION_CSS).append("""
+                    .scan-detail { margin-top: 40px; scroll-margin-top: 20px; }
+                    .scan-detail-header {
+                        display: flex; justify-content: space-between; align-items: baseline;
+                        flex-wrap: wrap; gap: 10px; margin-bottom: 15px;
+                    }
+                    .scan-detail-header h3 { font-size: 1.3rem; }
+                    .scan-url { color: #666; font-size: 0.9rem; word-break: break-all; margin-bottom: 15px; }
+                    .top-link { color: #667eea; text-decoration: none; font-size: 0.9rem; }
+                    .top-link:hover { text-decoration: underline; }
                     .summary {
                         display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
                         gap: 20px; padding: 30px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0;
@@ -307,20 +404,28 @@ public class AxeReportHook {
                         : scan.critical > 0 ? "Kritisch" : "Auff\u00e4llig";
 
                 html.append("                <tr>\n");
-                html.append("                    <td>").append(escapeHtml(scan.title)).append("</td>\n");
+                html.append("                    <td><a class=\"report-link\" href=\"#").append(scan.anchor).append("\">").append(escapeHtml(scan.title)).append("</a></td>\n");
                 html.append("                    <td>").append(escapeHtml(scan.url)).append("</td>\n");
                 html.append("                    <td>").append(scan.passes).append("</td>\n");
                 html.append("                    <td>").append(scan.violations).append("</td>\n");
                 html.append("                    <td><span class=\"badge ").append(badgeClass).append("\">").append(badgeLabel).append("</span></td>\n");
-                if (scan.htmlFile != null) {
-                    html.append("                    <td><a class=\"report-link\" href=\"").append(escapeHtml(scan.htmlFile)).append("\">Bericht &ouml;ffnen</a></td>\n");
-                } else {
-                    html.append("                    <td>&ndash;</td>\n");
-                }
+                html.append("                    <td><a class=\"report-link\" href=\"#").append(scan.anchor).append("\">Verst&ouml;&szlig;e anzeigen</a></td>\n");
                 html.append("                </tr>\n");
             }
 
             html.append("            </tbody></table>\n");
+
+            for (ScanSummary scan : scans) {
+                html.append("            <section class=\"scan-detail\" id=\"").append(scan.anchor).append("\">\n");
+                html.append("                <div class=\"scan-detail-header\">\n");
+                html.append("                    <h3>").append(escapeHtml(scan.title)).append(" &ndash; ")
+                        .append(scan.violations).append(" Verst&ouml;&szlig;e</h3>\n");
+                html.append("                    <a class=\"top-link\" href=\"#main-content\">&uarr; Zur &Uuml;bersicht</a>\n");
+                html.append("                </div>\n");
+                html.append("                <p class=\"scan-url\">").append(escapeHtml(scan.url)).append("</p>\n");
+                html.append(scan.detailsHtml);
+                html.append("            </section>\n");
+            }
         }
 
         html.append("""
@@ -335,66 +440,45 @@ public class AxeReportHook {
             </html>
             """);
 
-        Files.writeString(reportDir.resolve("index.html"), html.toString());
+        Path tmp = Files.createTempFile(reportDir, "index", ".html.tmp");
+        try {
+            Files.writeString(tmp, html.toString());
+            Files.move(tmp, reportDir.resolve("index.html"), StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     /**
-     * Liest alle JSON-Dateien im Verzeichnis und extrahiert die Zusammenfassungsdaten.
+     * Extrahiert die Kennzahlen eines Scans aus seinem JSON (Ergebnis von {@code AxeBuilder.analyze()}).
+     *
+     * @param rawName  Basisname der Report-Dateien (für den Titel)
+     * @param htmlFile Dateiname des Einzelberichts oder {@code null}
      */
-    private static List<ScanSummary> collectScans(Path reportDir) {
-        List<ScanSummary> scans = new ArrayList<>();
+    static ScanSummary summarize(JsonNode root, String rawName, String htmlFile) {
+        ScanSummary s = new ScanSummary();
+        s.title = beautifyTitle(rawName);
+        s.url = root.has("url") ? root.get("url").asText("") : "";
+        s.passes = root.has("passes") ? root.get("passes").size() : 0;
+        s.violations = root.has("violations") ? root.get("violations").size() : 0;
 
-        try (Stream<Path> files = Files.list(reportDir)) {
-            List<Path> jsonFiles = files
-                    .filter(p -> p.toString().endsWith(".json"))
-                    .sorted(Comparator.comparing(p -> p.getFileName().toString()))
-                    .toList();
-
-            for (Path jsonFile : jsonFiles) {
-                try {
-                    JsonNode root = mapper.readTree(jsonFile.toFile());
-                    ScanSummary s = new ScanSummary();
-
-                    // Titel aus Dateiname ableiten (z.B. "LoginSuccessfully-audit1234567890_1707812345678")
-                    String rawName = jsonFile.getFileName().toString().replace(".json", "");
-                    s.title = beautifyTitle(rawName);
-
-                    // URL der geprueften Seite
-                    s.url = root.has("url") ? root.get("url").asText("") : "";
-
-                    // Statistiken
-                    s.passes = root.has("passes") ? root.get("passes").size() : 0;
-                    s.violations = root.has("violations") ? root.get("violations").size() : 0;
-
-                    JsonNode violations = root.get("violations");
-                    if (violations != null && violations.isArray()) {
-                        for (JsonNode v : violations) {
-                            String impact = v.has("impact") ? v.get("impact").asText("") : "";
-                            switch (impact) {
-                                case "critical" -> s.critical++;
-                                case "serious" -> s.serious++;
-                                case "moderate" -> s.moderate++;
-                                case "minor" -> s.minor++;
-                            }
-                        }
-                    }
-
-                    // Passenden HTML-Einzelbericht suchen
-                    String htmlName = rawName + ".html";
-                    if (Files.exists(reportDir.resolve(htmlName))) {
-                        s.htmlFile = htmlName;
-                    }
-
-                    scans.add(s);
-                } catch (IOException e) {
-                    System.err.println("Fehler beim Lesen von " + jsonFile.getFileName() + ": " + e.getMessage());
+        JsonNode violations = root.get("violations");
+        if (violations != null && violations.isArray()) {
+            for (JsonNode v : violations) {
+                String impact = v.has("impact") ? v.get("impact").asText("") : "";
+                switch (impact) {
+                    case "critical" -> s.critical++;
+                    case "serious" -> s.serious++;
+                    case "moderate" -> s.moderate++;
+                    case "minor" -> s.minor++;
+                    default -> { }
                 }
             }
-        } catch (IOException e) {
-            System.err.println("Fehler beim Auflisten der Axe-Reports: " + e.getMessage());
         }
-
-        return scans;
+        s.htmlFile = htmlFile;
+        s.anchor = "scan-" + rawName.replaceAll("[^A-Za-z0-9_-]", "-");
+        s.detailsHtml = renderViolations(violations);
+        return s;
     }
 
     /**
@@ -421,7 +505,7 @@ public class AxeReportHook {
         return name.isEmpty() ? "Barrierefreiheits-Scan" : name;
     }
 
-    private static class ScanSummary {
+    static final class ScanSummary {
         String title = "";
         String url = "";
         int passes;
@@ -431,20 +515,17 @@ public class AxeReportHook {
         int moderate;
         int minor;
         String htmlFile;
+        /** Sprungmarke des Detailabschnitts in der index.html. */
+        String anchor = "";
+        /** Gerenderte Verstoß-Karten, siehe {@link #renderViolations(JsonNode)}. */
+        String detailsHtml = "";
     }
 
     // ───────────────────────────────────────────────
     //  Einzelbericht (pro Scan)
     // ───────────────────────────────────────────────
 
-    private static void generateSimpleHtml(AxeResults results, String fileName, Path reportDir) throws IOException {
-        int totalViolations = results.getViolations().size();
-        int totalPasses = results.getPasses().size();
-        int criticalCount = (int) results.getViolations().stream().filter(v -> "critical".equals(v.getImpact())).count();
-        int seriousCount = (int) results.getViolations().stream().filter(v -> "serious".equals(v.getImpact())).count();
-        int moderateCount = (int) results.getViolations().stream().filter(v -> "moderate".equals(v.getImpact())).count();
-        int minorCount = (int) results.getViolations().stream().filter(v -> "minor".equals(v.getImpact())).count();
-
+    private static void generateSimpleHtml(ScanSummary scan, String fileName, Path reportDir) throws IOException {
         StringBuilder html = new StringBuilder();
         html.append("""
             <!DOCTYPE html>
@@ -454,7 +535,7 @@ public class AxeReportHook {
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Barrierefreiheits-Prüfbericht</title>
                 <style>
-            """).append(BASE_REPORT_CSS).append("""
+            """).append(BASE_REPORT_CSS).append(VIOLATION_CSS).append("""
                     .back-link {
                         display: inline-block;
                         margin-top: 12px;
@@ -476,73 +557,9 @@ public class AxeReportHook {
 
                     .violations-section { padding: 30px; }
 
-                    .violation-card {
-                        background: white; border: 1px solid #e0e0e0; border-left: 4px solid;
-                        border-radius: 6px; padding: 20px; margin-bottom: 20px;
-                        transition: box-shadow 0.3s ease;
-                    }
-                    .violation-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-                    .violation-card.critical { border-left-color: #721c24; background: #f8d7da; }
-                    .violation-card.serious  { border-left-color: #dc3545; background: #fff5f5; }
-                    .violation-card.moderate  { border-left-color: #ffc107; background: #fff9e6; }
-                    .violation-card.minor     { border-left-color: #17a2b8; background: #e7f7f9; }
-
-                    .violation-header {
-                        display: flex; align-items: center; justify-content: space-between;
-                        margin-bottom: 15px; flex-wrap: wrap; gap: 10px;
-                    }
-                    .violation-title { font-size: 1.2rem; font-weight: 600; color: #333; flex: 1; }
-
-                    .impact-badge {
-                        display: inline-block; padding: 5px 15px; border-radius: 20px;
-                        font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
-                    }
-                    .impact-badge.critical { background: #721c24; color: white; }
-                    .impact-badge.serious  { background: #dc3545; color: white; }
-                    .impact-badge.moderate { background: #ffc107; color: #333; }
-                    .impact-badge.minor    { background: #17a2b8; color: white; }
-
-                    .violation-description { margin-bottom: 15px; color: #555; line-height: 1.6; }
-
-                    .violation-id {
-                        font-family: 'Courier New', monospace; background: #f5f5f5;
-                        padding: 2px 8px; border-radius: 4px; font-size: 0.85rem;
-                        color: #666; display: inline-block; margin-bottom: 10px;
-                    }
-
-                    .violation-nodes { background: #f8f9fa; border-radius: 4px; padding: 15px; margin-top: 15px; }
-                    .violation-nodes summary { cursor: pointer; font-weight: 600; color: #667eea; padding: 5px; user-select: none; }
-                    .violation-nodes summary:hover { color: #764ba2; }
-                    .violation-nodes summary:focus { outline: 2px solid #667eea; outline-offset: 2px; }
-
-                    .node-item { background: white; border-left: 3px solid #667eea; padding: 10px; margin: 10px 0; border-radius: 4px; }
-                    .node-target { font-family: 'Courier New', monospace; color: #d73a49; font-size: 0.9rem; margin-bottom: 8px; }
-                    .node-html {
-                        font-family: 'Courier New', monospace; background: #f6f8fa; padding: 10px;
-                        border-radius: 4px; overflow-x: auto; font-size: 0.85rem; color: #24292e; margin-top: 8px;
-                    }
-
-                    .help-link {
-                        display: inline-block; margin-top: 10px; padding: 10px 20px;
-                        background: #667eea; color: white; text-decoration: none;
-                        border-radius: 5px; font-weight: 500; transition: background 0.3s ease;
-                    }
-                    .help-link:hover { background: #764ba2; }
-                    .help-link:focus { outline: 3px solid #667eea; outline-offset: 2px; }
-
-                    .no-violations { text-align: center; padding: 60px 20px; color: #28a745; }
-                    .no-violations svg { width: 80px; height: 80px; margin-bottom: 20px; }
-                    .no-violations h2 { font-size: 1.8rem; margin-bottom: 10px; }
-
                     @media (max-width: 768px) {
                         .summary { grid-template-columns: 1fr; }
-                        .violation-header { flex-direction: column; align-items: flex-start; }
                         h1 { font-size: 1.5rem; }
-                    }
-
-                    @media print {
-                        body { background: white; }
-                        .violation-card { page-break-inside: avoid; }
                     }
                 </style>
             </head>
@@ -552,39 +569,40 @@ public class AxeReportHook {
                 <div class="container">
                     <header role="banner">
                         <h1>Barrierefreiheits-Pr&uuml;fbericht</h1>
-                        <p class="subtitle">Automatisierte WCAG 2.1 Pr&uuml;fung mit axe-core</p>
+                        <p class="subtitle">""").append(escapeHtml(scan.url)).append("""
+            </p>
                         <a href="index.html" class="back-link">&larr; Zur&uuml;ck zur &Uuml;bersicht</a>
                     </header>
 
                     <section class="summary" aria-label="Zusammenfassung der Ergebnisse">
                         <div class="summary-card success">
                             <div class="label">Erfolgreiche Tests</div>
-                            <div class="number">""").append(totalPasses).append("""
+                            <div class="number">""").append(scan.passes).append("""
                 </div>
                         </div>
                         <div class="summary-card danger">
                             <div class="label">Verstöße Gesamt</div>
-                            <div class="number">""").append(totalViolations).append("""
+                            <div class="number">""").append(scan.violations).append("""
                 </div>
                         </div>
                         <div class="summary-card danger">
                             <div class="label">Kritisch</div>
-                            <div class="number">""").append(criticalCount).append("""
+                            <div class="number">""").append(scan.critical).append("""
                 </div>
                         </div>
                         <div class="summary-card danger">
                             <div class="label">Schwerwiegend</div>
-                            <div class="number">""").append(seriousCount).append("""
+                            <div class="number">""").append(scan.serious).append("""
                 </div>
                         </div>
                         <div class="summary-card warning">
                             <div class="label">Moderat</div>
-                            <div class="number">""").append(moderateCount).append("""
+                            <div class="number">""").append(scan.moderate).append("""
                 </div>
                         </div>
                         <div class="summary-card warning">
                             <div class="label">Geringfügig</div>
-                            <div class="number">""").append(minorCount).append("""
+                            <div class="number">""").append(scan.minor).append("""
                 </div>
                         </div>
                     </section>
@@ -592,61 +610,10 @@ public class AxeReportHook {
                     <main id="main-content" class="violations-section" role="main">
             """);
 
-        if (totalViolations == 0) {
-            html.append("""
-                        <div class="no-violations">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <h2>Keine Verstöße gefunden!</h2>
-                            <p>Die Seite erfüllt alle geprüften Barrierefreiheits-Kriterien.</p>
-                        </div>
-                """);
-        } else {
-            html.append("                        <h2 class=\"section-title\">Gefundene Verstöße (").append(totalViolations).append(")</h2>\n");
-
-            for (var violation : results.getViolations()) {
-                String impact = violation.getImpact() != null ? violation.getImpact() : "minor";
-                String impactLabel = switch (impact) {
-                    case "critical" -> "Kritisch";
-                    case "serious" -> "Schwerwiegend";
-                    case "moderate" -> "Moderat";
-                    case "minor" -> "Geringfügig";
-                    default -> impact;
-                };
-
-                html.append("                        <article class=\"violation-card ").append(impact).append("\">\n");
-                html.append("                            <div class=\"violation-header\">\n");
-                html.append("                                <h3 class=\"violation-title\">").append(escapeHtml(violation.getHelp())).append("</h3>\n");
-                html.append("                                <span class=\"impact-badge ").append(impact).append("\">").append(impactLabel).append("</span>\n");
-                html.append("                            </div>\n");
-                html.append("                            <div class=\"violation-id\">Regel-ID: ").append(escapeHtml(violation.getId())).append("</div>\n");
-                html.append("                            <p class=\"violation-description\">").append(escapeHtml(violation.getDescription())).append("</p>\n");
-
-                if (violation.getNodes() != null && !violation.getNodes().isEmpty()) {
-                    html.append("                            <details class=\"violation-nodes\">\n");
-                    html.append("                                <summary>Betroffene Elemente anzeigen (").append(violation.getNodes().size()).append(")</summary>\n");
-
-                    for (var node : violation.getNodes()) {
-                        html.append("                                <div class=\"node-item\">\n");
-                        if (node.getTarget() != null) {
-                            String target = String.valueOf(node.getTarget());
-                            if (!target.isEmpty() && !"null".equals(target)) {
-                                html.append("                                    <div class=\"node-target\">Target: ").append(escapeHtml(target)).append("</div>\n");
-                            }
-                        }
-                        if (node.getHtml() != null && !node.getHtml().isEmpty()) {
-                            html.append("                                    <div class=\"node-html\">").append(escapeHtml(node.getHtml())).append("</div>\n");
-                        }
-                        html.append("                                </div>\n");
-                    }
-                    html.append("                            </details>\n");
-                }
-
-                html.append("                            <a href=\"").append(escapeHtml(violation.getHelpUrl())).append("\" class=\"help-link\" target=\"_blank\" rel=\"noopener noreferrer\">Mehr Informationen und Lösungsvorschläge</a>\n");
-                html.append("                        </article>\n");
-            }
+        if (scan.violations > 0) {
+            html.append("                        <h2 class=\"section-title\">Gefundene Verstöße (").append(scan.violations).append(")</h2>\n");
         }
+        html.append(scan.detailsHtml);
 
         html.append("""
                     </main>
@@ -662,6 +629,94 @@ public class AxeReportHook {
             """);
 
         Files.writeString(reportDir.resolve(fileName + ".html"), html.toString());
+    }
+
+    /**
+     * Rendert die Verstöße eines Scans (Array {@code violations} aus dem Axe-JSON) als Karten.
+     * Wird vom Einzelbericht und von der index.html genutzt, damit die Übersicht auch ohne die
+     * Einzelberichte vollständig ist (z.B. als einzelner Anhang am Zephyr-Test-Cycle).
+     */
+    static String renderViolations(JsonNode violations) {
+        StringBuilder html = new StringBuilder();
+        if (violations == null || !violations.isArray() || violations.isEmpty()) {
+            html.append("""
+                        <div class="no-violations">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <h3>Keine Verstöße gefunden!</h3>
+                            <p>Die Seite erfüllt alle geprüften Barrierefreiheits-Kriterien.</p>
+                        </div>
+                """);
+            return html.toString();
+        }
+
+        for (JsonNode violation : violations) {
+            String impact = switch (text(violation, "impact")) {
+                case "critical", "serious", "moderate" -> text(violation, "impact");
+                default -> "minor";
+            };
+            String impactLabel = switch (impact) {
+                case "critical" -> "Kritisch";
+                case "serious" -> "Schwerwiegend";
+                case "moderate" -> "Moderat";
+                default -> "Geringfügig";
+            };
+
+            html.append("                        <article class=\"violation-card ").append(impact).append("\">\n");
+            html.append("                            <div class=\"violation-header\">\n");
+            html.append("                                <h3 class=\"violation-title\">").append(escapeHtml(text(violation, "help"))).append("</h3>\n");
+            html.append("                                <span class=\"impact-badge ").append(impact).append("\">").append(impactLabel).append("</span>\n");
+            html.append("                            </div>\n");
+            html.append("                            <div class=\"violation-id\">Regel-ID: ").append(escapeHtml(text(violation, "id"))).append("</div>\n");
+            html.append("                            <p class=\"violation-description\">").append(escapeHtml(text(violation, "description"))).append("</p>\n");
+
+            JsonNode nodes = violation.get("nodes");
+            if (nodes != null && nodes.isArray() && !nodes.isEmpty()) {
+                html.append("                            <details class=\"violation-nodes\">\n");
+                html.append("                                <summary>Betroffene Elemente anzeigen (").append(nodes.size()).append(")</summary>\n");
+                for (JsonNode node : nodes) {
+                    html.append("                                <div class=\"node-item\">\n");
+                    String target = target(node.get("target"));
+                    if (!target.isEmpty()) {
+                        html.append("                                    <div class=\"node-target\">Target: ").append(escapeHtml(target)).append("</div>\n");
+                    }
+                    String nodeHtml = text(node, "html");
+                    if (!nodeHtml.isEmpty()) {
+                        html.append("                                    <div class=\"node-html\">").append(escapeHtml(nodeHtml)).append("</div>\n");
+                    }
+                    html.append("                                </div>\n");
+                }
+                html.append("                            </details>\n");
+            }
+
+            String helpUrl = text(violation, "helpUrl");
+            if (helpUrl.startsWith("https://") || helpUrl.startsWith("http://")) {
+                html.append("                            <a href=\"").append(escapeHtml(helpUrl)).append("\" class=\"help-link\" target=\"_blank\" rel=\"noopener noreferrer\">Mehr Informationen und Lösungsvorschläge</a>\n");
+            }
+            html.append("                        </article>\n");
+        }
+        return html.toString();
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? "" : value.asText("");
+    }
+
+    /** Axe liefert {@code target} als Array von Selektoren (bei iframes verschachtelt). */
+    private static String target(JsonNode target) {
+        if (target == null || target.isNull()) {
+            return "";
+        }
+        if (!target.isArray()) {
+            return target.asText("");
+        }
+        List<String> parts = new ArrayList<>();
+        for (JsonNode part : target) {
+            parts.add(part.isArray() ? target(part) : part.asText(""));
+        }
+        return String.join(", ", parts);
     }
 
     private static String escapeHtml(String text) {

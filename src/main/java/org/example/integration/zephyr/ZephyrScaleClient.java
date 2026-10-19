@@ -18,6 +18,7 @@ import org.springframework.web.client.RestTemplate;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
@@ -25,11 +26,14 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
 
     private static final String ATM_BASE = "/rest/atm/1.0";
 
+    /** Zephyr-Testrun-Key wie {@code PROJ-R1} / {@code PROJ-C15}. */
+    private static final Pattern TEST_RUN_KEY = Pattern.compile("^[A-Z][A-Z0-9_]{1,9}-[A-Z]?\\d+$");
+
     // zephyr.* Werte bewusst nicht per @Value injiziert, sondern ueber ConfigReader gelesen:
     // Spring's @Value liest keine .env-Datei, ConfigReader unterstuetzt das bereits (dotenv-java).
     @Autowired
     public ZephyrScaleClient() {
-        this(new RestTemplate(),
+        this(defaultRestTemplate(),
                 ConfigReader.get("zephyr.base-url", "https://jira.yourcompany.com"),
                 ConfigReader.get("zephyr.username", ""),
                 ConfigReader.get("zephyr.api-token", ""));
@@ -41,13 +45,19 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
 
     /** Liest einen bestehenden Testrun (samt enthaltener Testfaelle in {@code items}). */
     public ZephyrTestRun getTestRun(String testRunKey) {
+        // Zweite Absicherung neben der Request-Validierung: der Key landet im URL-Pfad und wird mit
+        // den Rechten des Service-Accounts aufgerufen (z.B. "../../api/2/..." wäre sonst möglich).
+        if (testRunKey == null || !TEST_RUN_KEY.matcher(testRunKey).matches()) {
+            log.warn("Ungültiger Zephyr-Testrun-Key verworfen: '{}'", testRunKey);
+            return null;
+        }
         String url = baseUrl + ATM_BASE + "/testrun/" + testRunKey;
         try {
             ResponseEntity<ZephyrTestRun> response = restTemplate.exchange(
                     url, HttpMethod.GET, new HttpEntity<>(buildHeaders()), ZephyrTestRun.class);
             return response.getBody();
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr getTestRun failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr getTestRun failed: url={}, status={}, body={}", url, e.getStatusCode(), abbreviate(e.getResponseBodyAsString()));
             return null;
         }
     }
@@ -63,7 +73,7 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
             }
             return cycle;
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr createTestCycle failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr createTestCycle failed: url={}, status={}, body={}", url, e.getStatusCode(), abbreviate(e.getResponseBodyAsString()));
             return null;
         }
     }
@@ -77,7 +87,7 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
                     log.info("Zephyr Execution uploaded: testCaseKey={}, status={}",
                             e.getTestCaseKey(), e.getStatus()));
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr uploadTestResults failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr uploadTestResults failed: url={}, status={}, body={}", url, e.getStatusCode(), abbreviate(e.getResponseBodyAsString()));
         }
     }
 
@@ -92,7 +102,7 @@ public class ZephyrScaleClient extends AbstractAtlassianClient {
                     new HttpEntity<>(body, buildHeaders(MediaType.MULTIPART_FORM_DATA)), Void.class);
             log.info("Zephyr Attachment hochgeladen: cycleKey={}, file={}", cycleKey, file.getFileName());
         } catch (HttpStatusCodeException e) {
-            log.error("Zephyr uploadAttachment failed: url={}, status={}, body={}", url, e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Zephyr uploadAttachment failed: url={}, status={}, body={}", url, e.getStatusCode(), abbreviate(e.getResponseBodyAsString()));
         }
     }
 }

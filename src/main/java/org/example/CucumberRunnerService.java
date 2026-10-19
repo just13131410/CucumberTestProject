@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -48,14 +49,30 @@ public class CucumberRunnerService {
     }
 
     public RunResult run(String runId, String tags, String features) throws Exception {
+        return run(runId, tags, features, Map.of());
+    }
+
+    /**
+     * Wie {@link #run(String, String, String)}, mit den run-spezifischen Properties des Requests
+     * (Overrides aus {@code environmentVariables}, Browser, Headless). In-Process sind sie bereits als
+     * System-Properties gesetzt; im Subprozess-Modus gehen sie als {@code -D} an die Kind-JVM, sonst
+     * sähen die Steps dort nur die Umgebung des Pods.
+     */
+    public RunResult run(String runId, String tags, String features, Map<String, String> runProperties)
+            throws Exception {
         String normalizedTags = (tags != null && !tags.isBlank()) ? normalizeLabel(tags) : null;
-        return dispatch(runId, normalizedTags, features);
+        return dispatch(runId, normalizedTags, features, runProperties);
+    }
+
+    private RunResult dispatch(String runId, String tags, String features) throws Exception {
+        return dispatch(runId, tags, features, Map.of());
     }
 
     /** Wählt Ausführungsmodus und delegiert. */
-    private RunResult dispatch(String runId, String tags, String features) throws Exception {
+    private RunResult dispatch(String runId, String tags, String features, Map<String, String> runProperties)
+            throws Exception {
         if ("subprocess".equalsIgnoreCase(executionMode)) {
-            return executeInSubprocess(runId, tags, features);
+            return executeInSubprocess(runId, tags, features, runProperties);
         }
         return executeInProcess(runId, tags, features);
     }
@@ -71,12 +88,13 @@ public class CucumberRunnerService {
      * Klassenpfad, reicht ergebnisrelevante System-Properties und die komplette Umgebung durch,
      * streamt Ausgaben in {@code <runDir>/runner.log} und erzwingt bei Timeout {@code destroyForcibly}.
      */
-    RunResult executeInSubprocess(String runId, String tags, String features) throws Exception {
+    RunResult executeInSubprocess(String runId, String tags, String features, Map<String, String> runProperties)
+            throws Exception {
         Path runDir = TestResultPaths.forRun(runId);
         Files.createDirectories(runDir);
         Path logFile = runDir.resolve("runner.log");
 
-        List<String> cmd = buildSubprocessCommand(runId, tags, features);
+        List<String> cmd = buildSubprocessCommand(runId, tags, features, runProperties);
         log.info("Starte Cucumber-Subprozess: runId={}, timeout={}s, log={}",
                 runId, subprocessTimeoutSeconds, logFile);
         log.debug("Subprozess-Kommando: {}", String.join(" ", cmd));
@@ -101,8 +119,12 @@ public class CucumberRunnerService {
         return new RunResult(runId, tags, exitCode, runDir.toString());
     }
 
-    /** Baut das {@code java ... CucumberRunnerMain}-Kommando für den Kind-Prozess. */
     List<String> buildSubprocessCommand(String runId, String tags, String features) {
+        return buildSubprocessCommand(runId, tags, features, Map.of());
+    }
+
+    /** Baut das {@code java ... CucumberRunnerMain}-Kommando für den Kind-Prozess. */
+    List<String> buildSubprocessCommand(String runId, String tags, String features, Map<String, String> runProperties) {
         String javaBin = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
         String classpath = System.getProperty("java.class.path");
 
@@ -117,6 +139,14 @@ public class CucumberRunnerService {
         forwardProperty(cmd, "test.results.path");
         forwardProperty(cmd, "browser");
         forwardProperty(cmd, "browser.headless");
+        // Run-Properties des Requests (überschreiben ggf. die oben weitergereichten Werte, letztes -D gewinnt).
+        if (runProperties != null) {
+            runProperties.forEach((k, v) -> {
+                if (k != null && !k.isBlank() && v != null) {
+                    cmd.add("-D" + k + "=" + v);
+                }
+            });
+        }
         cmd.add("-cp");
         cmd.add(classpath);
         cmd.add(CucumberRunnerMain.class.getName());

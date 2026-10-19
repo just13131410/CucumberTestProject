@@ -1,5 +1,6 @@
 package org.example.cucumber.service;
 
+import org.example.cucumber.model.RunState;
 import org.example.CucumberRunnerService;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
@@ -63,7 +64,7 @@ class TestExecutionServiceTest {
         return request;
     }
 
-    private void awaitStatus(UUID runId, String expectedStatus) {
+    private void awaitStatus(UUID runId, RunState expectedStatus) {
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
             Optional<TestStatus> status = testExecutionService.getTestStatus(runId);
             assertTrue(status.isPresent());
@@ -106,7 +107,7 @@ class TestExecutionServiceTest {
 
         assertNotNull(response);
         assertNotNull(response.getRunId());
-        assertEquals("QUEUED", response.getStatus());
+        assertEquals(RunState.QUEUED, response.getStatus());
         assertEquals("dev", response.getEnvironment());
         assertEquals("Test execution queued successfully", response.getMessage());
         assertTrue(response.getStatusUrl().contains(response.getRunId().toString()));
@@ -137,14 +138,14 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_SuccessfulRun_StatusCompleted() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "target/runs/id"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertEquals(100, finalStatus.getProgress());
@@ -154,14 +155,14 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_FailedExitCode_StatusFailed() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 1, "target/runs/id"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "FAILED");
+        awaitStatus(runId, RunState.FAILED);
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertNotNull(finalStatus.getErrorMessage());
@@ -170,14 +171,14 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_ExceptionThrown_StatusFailed() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenThrow(new RuntimeException("Cucumber crashed"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "FAILED");
+        awaitStatus(runId, RunState.FAILED);
 
         TestStatus finalStatus = testExecutionService.getTestStatus(runId).orElseThrow();
         assertTrue(finalStatus.getErrorMessage().contains("Cucumber crashed"));
@@ -209,7 +210,7 @@ class TestExecutionServiceTest {
     void getActiveTests_ReturnsOnlyActiveStatuses() throws Exception {
         // Make the run block so it stays in RUNNING state
         CountDownLatch blockLatch = new CountDownLatch(1);
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenAnswer(invocation -> {
                     blockLatch.await(5, TimeUnit.SECONDS);
                     return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -222,7 +223,7 @@ class TestExecutionServiceTest {
             List<TestStatus> active = testExecutionService.getActiveTests();
             assertFalse(active.isEmpty());
             assertTrue(active.stream().allMatch(t ->
-                    "QUEUED".equals(t.getStatus()) || "RUNNING".equals(t.getStatus())));
+                    RunState.QUEUED == t.getStatus() || RunState.RUNNING == t.getStatus()));
         });
 
         blockLatch.countDown(); // unblock
@@ -240,7 +241,7 @@ class TestExecutionServiceTest {
     @Test
     void cancelTestExecution_RunningTest_CancelsSuccessfully() throws Exception {
         CountDownLatch blockLatch = new CountDownLatch(1);
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenAnswer(invocation -> {
                     blockLatch.await(10, TimeUnit.SECONDS);
                     return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -253,13 +254,13 @@ class TestExecutionServiceTest {
         await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
             Optional<TestStatus> status = testExecutionService.getTestStatus(response.getRunId());
             assertTrue(status.isPresent());
-            assertTrue(List.of("QUEUED", "RUNNING").contains(status.get().getStatus()));
+            assertTrue(List.of(RunState.QUEUED, RunState.RUNNING).contains(status.get().getStatus()));
         });
 
         Optional<TestStatus> cancelled = testExecutionService.cancelTestExecution(response.getRunId());
 
         if (cancelled.isPresent()) {
-            assertEquals("CANCELLED", cancelled.get().getStatus());
+            assertEquals(RunState.CANCELLED, cancelled.get().getStatus());
             assertEquals(response.getRunId(), cancelled.get().getRunId());
         }
 
@@ -275,14 +276,14 @@ class TestExecutionServiceTest {
 
     @Test
     void deleteTestExecution_CompletedRun_ReturnsTrue() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "target/runs/id"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         assertTrue(testExecutionService.deleteTestExecution(runId));
         assertFalse(testExecutionService.getTestStatus(runId).isPresent());
@@ -291,7 +292,7 @@ class TestExecutionServiceTest {
     @Test
     void deleteTestExecution_RunningTest_ReturnsFalse() throws Exception {
         CountDownLatch blockLatch = new CountDownLatch(1);
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenAnswer(invocation -> {
                     blockLatch.await(10, TimeUnit.SECONDS);
                     return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -303,7 +304,7 @@ class TestExecutionServiceTest {
         await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> {
             Optional<TestStatus> status = testExecutionService.getTestStatus(response.getRunId());
             assertTrue(status.isPresent());
-            assertTrue(List.of("QUEUED", "RUNNING").contains(status.get().getStatus()));
+            assertTrue(List.of(RunState.QUEUED, RunState.RUNNING).contains(status.get().getStatus()));
         });
 
         assertFalse(testExecutionService.deleteTestExecution(response.getRunId()));
@@ -333,7 +334,7 @@ class TestExecutionServiceTest {
 
     @Test
     void getStatistics_WithEnvironmentFilter_FiltersByEnvironment() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
 
         testExecutionService.queueTestExecution(createRequest("dev", List.of("@smoke")));
@@ -376,7 +377,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
 
         assertNotNull(response);
-        assertEquals("QUEUED", response.getStatus());
+        assertEquals(RunState.QUEUED, response.getStatus());
     }
 
     @Test
@@ -387,7 +388,7 @@ class TestExecutionServiceTest {
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
 
         assertNotNull(response);
-        assertEquals("QUEUED", response.getStatus());
+        assertEquals(RunState.QUEUED, response.getStatus());
     }
 
     // --- reportUrls: accessibility nur für Frontend-Tests ---
@@ -395,14 +396,14 @@ class TestExecutionServiceTest {
     @ParameterizedTest(name = "tags={0} -> accessibility present={1}")
     @MethodSource("accessibilityUrlCases")
     void execution_TagsDetermineAccessibilityUrlPresence(List<String> tags, boolean expectPresent) throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", tags.get(0), 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", tags);
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
         assertEquals(expectPresent, urls.containsKey("accessibility"));
@@ -421,14 +422,14 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_FrontendTag_AccessibilityUrlPointsToAxeResult() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@Frontend", 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@Frontend"));
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
         assertTrue(urls.get("accessibility").contains("/axe-result/index.html"));
@@ -438,14 +439,14 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_CompletedRun_AllReportUrlsUseReportsPrefix() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         Map<String, String> urls = testExecutionService.getTestStatus(runId).orElseThrow().getReportUrls();
 
@@ -478,14 +479,14 @@ class TestExecutionServiceTest {
 
     @Test
     void execution_CompletedRun_DurationFormattedAsMinSec() throws Exception {
-        when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+        when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                 .thenReturn(new CucumberRunnerService.RunResult("id", "@smoke", 0, "out"));
 
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
         TestExecutionResponse response = testExecutionService.queueTestExecution(request);
         UUID runId = response.getRunId();
 
-        awaitStatus(runId, "COMPLETED");
+        awaitStatus(runId, RunState.COMPLETED);
 
         String duration = testExecutionService.getTestStatus(runId).orElseThrow().getDuration();
         assertNotNull(duration);
@@ -531,7 +532,7 @@ class TestExecutionServiceTest {
         TestExecutionService svc = newService(1, 1);
         try {
             CountDownLatch block = new CountDownLatch(1);
-            when(cucumberRunnerService.run(anyString(), anyString(), isNull()))
+            when(cucumberRunnerService.run(anyString(), anyString(), isNull(), anyMap()))
                     .thenAnswer(inv -> {
                         block.await(10, TimeUnit.SECONDS);
                         return new CucumberRunnerService.RunResult("id", "@smoke", 0, "out");
@@ -540,7 +541,7 @@ class TestExecutionServiceTest {
             TestExecutionRequest req = createRequest("dev", List.of("@smoke"));
             svc.queueTestExecution(req); // belegt den einen Ausführungs-Thread
             await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
-                    assertTrue(svc.getActiveTests().stream().anyMatch(s -> "RUNNING".equals(s.getStatus()))));
+                    assertTrue(svc.getActiveTests().stream().anyMatch(s -> RunState.RUNNING == s.getStatus())));
             svc.queueTestExecution(req); // füllt die Queue (Größe 1)
 
             assertThrows(CapacityExceededException.class,
@@ -550,5 +551,78 @@ class TestExecutionServiceTest {
         } finally {
             svc.shutdown();
         }
+    }
+
+    // --- Request-Overrides: alles außer JVM-/Framework-Präfixen ---
+
+    @Test
+    void filterOverrides_PassesApplicationKeys() {
+        Map<String, String> requested = new java.util.LinkedHashMap<>();
+        requested.put("TEST_ENV", "qa");
+        requested.put("serviceUrl", "https://service.example");
+        requested.put("apiURL", "https://api.example");
+
+        Map<String, String> result = TestExecutionService.filterOverrides(requested);
+
+        assertEquals(requested, result);
+    }
+
+    @Test
+    void filterOverrides_BlocksJvmAndFrameworkPrefixes_CaseInsensitive() {
+        Map<String, String> requested = new java.util.LinkedHashMap<>();
+        requested.put("java.io.tmpdir", "/tmp/x");
+        requested.put("Spring.profiles.active", "prod");
+        requested.put("server.port", "1");
+        requested.put("user.home", "/x");
+        requested.put("baseUrl", "https://app.example/");
+
+        Map<String, String> result = TestExecutionService.filterOverrides(requested);
+
+        assertEquals(Map.of("baseUrl", "https://app.example/"), result);
+    }
+
+    @Test
+    void filterOverrides_NullMapAndNullEntriesAreIgnored() {
+        assertTrue(TestExecutionService.filterOverrides(null).isEmpty());
+        Map<String, String> withNull = new java.util.HashMap<>();
+        withNull.put("a", null);
+        withNull.put(null, "x");
+        assertTrue(TestExecutionService.filterOverrides(withNull).isEmpty());
+    }
+
+    @Test
+    void queueTestExecution_EnvVar_IsSetDuringRunAndRestoredAfterwards() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>("unset");
+        when(cucumberRunnerService.run(anyString(), any(), any(), anyMap())).thenAnswer(inv -> {
+            seen.set(String.valueOf(System.getProperty("serviceUrl")));
+            return new CucumberRunnerService.RunResult(inv.getArgument(0), "@smoke", 0, "/tmp");
+        });
+        TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
+        request.setEnvironmentVariables(Map.of("serviceUrl", "https://service.example"));
+
+        UUID runId = testExecutionService.queueTestExecution(request).getRunId();
+        awaitStatus(runId, RunState.COMPLETED);
+
+        assertEquals("https://service.example", seen.get());
+        assertNull(System.getProperty("serviceUrl"), "Override darf nicht in Folge-Läufe durchsickern");
+    }
+
+    // --- P4: Szenario-Erkennung (englisch + deutsch) ---
+
+    @Test
+    void isScenarioLine_RecognizesEnglishAndGermanScenarios() {
+        assertTrue(TestExecutionService.isScenarioLine("  Szenario: Erfolgreicher Login"));
+        assertTrue(TestExecutionService.isScenarioLine("Szenariogrundriss: Filter"));
+        assertTrue(TestExecutionService.isScenarioLine("  Beispiel: kurz"));
+        assertTrue(TestExecutionService.isScenarioLine("Scenario: Login"));
+        assertTrue(TestExecutionService.isScenarioLine("Scenario Outline: Filter"));
+    }
+
+    @Test
+    void isScenarioLine_IgnoresExamplesTablesAndOtherLines() {
+        assertFalse(TestExecutionService.isScenarioLine("    Beispiele:"));
+        assertFalse(TestExecutionService.isScenarioLine("    Examples:"));
+        assertFalse(TestExecutionService.isScenarioLine("Funktionalität: Vorgangs-Dashboard"));
+        assertFalse(TestExecutionService.isScenarioLine("  # Szenario: auskommentiert"));
     }
 }

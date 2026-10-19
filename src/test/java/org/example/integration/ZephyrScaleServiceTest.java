@@ -43,7 +43,7 @@ class ZephyrScaleServiceTest {
         mockIntegrationService = new MockIntegrationService();
         ReflectionTestUtils.setField(mockIntegrationService, "zephyrBaseUrl", "https://jira.test.com");
 
-        service = new ZephyrScaleService(zephyrClient, jiraClient, new CucumberResultReader(), mockIntegrationService);
+        service = new ZephyrScaleService(zephyrClient, jiraClient, new CucumberResultReader(false), mockIntegrationService);
         ReflectionTestUtils.setField(service, "zephyrEnabled", true);
         ReflectionTestUtils.setField(service, "defaultProjectKey", "PROJ");
         ReflectionTestUtils.setField(service, "jiraEnabled", false);

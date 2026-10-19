@@ -9,13 +9,17 @@ import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.integration.model.ZephyrScriptResult;
 import org.example.integration.model.ZephyrTestExecution;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -31,7 +35,18 @@ public class CucumberResultReader {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * Liefert detaillierte Testausfuehrungen (eine pro {@code @T-XXXX}-getaggtem Szenario) aus
+     * {@code true}, wenn die Zephyr-Testfaelle zu Scenario Outlines eine Testdaten-Tabelle haben: Zephyr
+     * wiederholt dann die Skript-Schritte je Datenzeile, die {@code scriptResults} werden pro
+     * Beispielzeile hintereinander gesendet statt zusammengefasst.
+     */
+    private final boolean outlineRowsAsTestData;
+
+    public CucumberResultReader(@Value("${zephyr.outline-rows-as-test-data:false}") boolean outlineRowsAsTestData) {
+        this.outlineRowsAsTestData = outlineRowsAsTestData;
+    }
+
+    /**
+     * Liefert detaillierte Testausfuehrungen (eine pro {@code @T-XXXX}-Testfall-Key) aus
      * dem Cucumber-JSON-Report, falls vorhanden; sonst einen einzelnen Fallback-Eintrag mit dem
      * Gesamtstatus des Runs.
      */
@@ -50,27 +65,32 @@ public class CucumberResultReader {
                 .build());
     }
 
+    /**
+     * Fasst alle Elemente mit demselben Testfall-Key zu genau einer Ausfuehrung zusammen. Noetig fuer
+     * Scenario Outlines: Cucumber schreibt jede Beispielzeile als eigenes Element mit denselben Tags.
+     * Einzeln hochgeladen wuerde in Zephyr nur das zuletzt angelegte Ergebnis sichtbar - ein
+     * Fehlschlag frueherer Zeilen ginge verloren.
+     */
     private List<ZephyrTestExecution> parseDetailedExecutions(Path cucumberJson) {
         try {
             List<CucumberFeature> features = objectMapper.readValue(
                     cucumberJson.toFile(), new TypeReference<>() {});
-            List<ZephyrTestExecution> executions = new ArrayList<>();
+            Map<String, List<CucumberElement>> elementsByKey = new LinkedHashMap<>();
             for (CucumberFeature feature : features) {
                 if (feature.getElements() == null) continue;
                 for (CucumberElement element : feature.getElements()) {
                     String testCaseKey = extractTestCaseKey(element.getTags());
                     if (testCaseKey == null) continue;
-                    List<CucumberStep> steps = element.getSteps();
-                    boolean allPassed = steps != null && steps.stream()
-                            .allMatch(s -> s.getResult() != null && "passed".equals(s.getResult().getStatus()));
-                    executions.add(ZephyrTestExecution.builder()
-                            .testCaseKey(testCaseKey)
-                            .status(allPassed ? "Pass" : "Fail")
-                            .comment(buildStepComment(steps))
-                            .scriptResults(buildScriptResults(steps))
-                            .build());
+                    elementsByKey.computeIfAbsent(testCaseKey, k -> new ArrayList<>()).add(element);
                 }
             }
+            List<ZephyrTestExecution> executions = new ArrayList<>();
+            elementsByKey.forEach((testCaseKey, elements) -> executions.add(ZephyrTestExecution.builder()
+                    .testCaseKey(testCaseKey)
+                    .status(elements.stream().allMatch(CucumberResultReader::isPassed) ? "Pass" : "Fail")
+                    .comment(buildComment(elements))
+                    .scriptResults(buildScriptResults(elements))
+                    .build()));
             return executions;
         } catch (IOException e) {
             log.warn("Failed to parse Cucumber JSON at {}: {}", cucumberJson, e.getMessage());
@@ -78,16 +98,61 @@ public class CucumberResultReader {
         }
     }
 
+    /** Bestanden nur, wenn alle Steps bestanden und kein Before-/After-Hook fehlgeschlagen ist. */
+    private static boolean isPassed(CucumberElement element) {
+        List<CucumberStep> steps = element.getSteps();
+        boolean stepsPassed = steps != null && steps.stream()
+                .allMatch(s -> s.getResult() != null && "passed".equals(s.getResult().getStatus()));
+        return stepsPassed && failedHooks(element).isEmpty();
+    }
+
+    private static List<CucumberHook> failedHooks(CucumberElement element) {
+        List<CucumberHook> failed = new ArrayList<>();
+        for (List<CucumberHook> hooks : Arrays.asList(element.getBefore(), element.getAfter())) {
+            if (hooks == null) continue;
+            hooks.stream()
+                    .filter(h -> h.getResult() != null && "failed".equals(h.getResult().getStatus()))
+                    .forEach(failed::add);
+        }
+        return failed;
+    }
+
     /**
-     * Baut das Zephyr-Comment aus den Cucumber-Steps: bestandene Steps mit Haekchen, der
-     * fehlgeschlagene Step mit Kreuz + Fehlermeldung (erste Zeile), uebersprungene Steps markiert.
-     * Zeilenumbrueche als {@code <br>}, da das Zephyr-Comment-Feld HTML rendert.
+     * Ein Element: Schritt-Kommentar wie bisher. Mehrere Elemente (Outline-Beispielzeilen): pro Zeile
+     * ein Abschnitt mit Ueberschrift "Beispiel n (Zeile x): Status".
      */
-    private String buildStepComment(List<CucumberStep> steps) {
-        if (steps == null || steps.isEmpty()) {
-            return null;
+    private String buildComment(List<CucumberElement> elements) {
+        if (elements.size() == 1) {
+            return buildElementComment(elements.get(0));
         }
         StringBuilder comment = new StringBuilder();
+        for (int i = 0; i < elements.size(); i++) {
+            CucumberElement element = elements.get(i);
+            if (i > 0) {
+                comment.append("<br><br>");
+            }
+            comment.append("<b>").append(exampleLabel(i, element))
+                    .append(": ").append(isPassed(element) ? "Pass" : "Fail").append("</b>");
+            String elementComment = buildElementComment(element);
+            if (elementComment != null) {
+                comment.append("<br>").append(elementComment);
+            }
+        }
+        return comment.toString();
+    }
+
+    private static String exampleLabel(int position, CucumberElement element) {
+        return "Beispiel " + (position + 1) + (element.getLine() != null ? " (Zeile " + element.getLine() + ")" : "");
+    }
+
+    /**
+     * Baut das Zephyr-Comment aus den Cucumber-Steps: bestandene Steps mit Haekchen, der
+     * fehlgeschlagene Step mit Kreuz + Fehlermeldung (erste Zeile), uebersprungene Steps markiert,
+     * fehlgeschlagene Hooks am Ende. Zeilenumbrueche als {@code <br>}, da das Zephyr-Comment-Feld HTML rendert.
+     */
+    private String buildElementComment(CucumberElement element) {
+        StringBuilder comment = new StringBuilder();
+        List<CucumberStep> steps = element.getSteps() != null ? element.getSteps() : List.of();
         for (CucumberStep step : steps) {
             if (comment.length() > 0) {
                 comment.append("<br>");
@@ -108,7 +173,17 @@ public class CucumberResultReader {
                 comment.append("⏭️ ").append(stepText);
             }
         }
-        return comment.toString();
+        for (CucumberHook hook : failedHooks(element)) {
+            if (comment.length() > 0) {
+                comment.append("<br>");
+            }
+            comment.append("❌ Hook fehlgeschlagen");
+            String errorMessage = hook.getResult().getErrorMessage();
+            if (errorMessage != null && !errorMessage.isBlank()) {
+                comment.append(": ").append(escapeHtml(firstLine(errorMessage)));
+            }
+        }
+        return comment.length() > 0 ? comment.toString() : null;
     }
 
     /**
@@ -116,29 +191,83 @@ public class CucumberResultReader {
      * Gesamtstatus des Testfalls, sondern auch den Status jedes einzelnen Skript-Schritts zeigt.
      * {@code index} muss zur Position des zugehoerigen Schritts im Zephyr-Testfall-Skript passen
      * (setzt eine 1:1-Zuordnung BDD-Schritt zu Zephyr-Skript-Schritt in derselben Reihenfolge voraus).
+     * Bei mehreren Beispielzeilen gilt je Schritt der schlechteste Status (Fail vor Not Executed vor
+     * Pass); der Kommentar nennt die erste fehlgeschlagene Zeile.
      */
-    private List<ZephyrScriptResult> buildScriptResults(List<CucumberStep> steps) {
-        if (steps == null || steps.isEmpty()) {
+    private List<ZephyrScriptResult> buildScriptResults(List<CucumberElement> elements) {
+        if (outlineRowsAsTestData && elements.size() > 1) {
+            return buildTestDataScriptResults(elements);
+        }
+        int stepCount = elements.stream()
+                .mapToInt(e -> e.getSteps() != null ? e.getSteps().size() : 0)
+                .max().orElse(0);
+        if (stepCount == 0) {
             return null;
         }
+        boolean multipleRows = elements.size() > 1;
         List<ZephyrScriptResult> scriptResults = new ArrayList<>();
-        for (int i = 0; i < steps.size(); i++) {
-            CucumberStep step = steps.get(i);
-            String status = step.getResult() != null ? step.getResult().getStatus() : null;
+        for (int i = 0; i < stepCount; i++) {
+            String worstStatus = null;
             String comment = null;
-            if ("failed".equals(status)) {
-                String errorMessage = step.getResult().getErrorMessage();
-                if (errorMessage != null && !errorMessage.isBlank()) {
-                    comment = firstLine(errorMessage);
+            for (int row = 0; row < elements.size(); row++) {
+                List<CucumberStep> steps = elements.get(row).getSteps();
+                if (steps == null || i >= steps.size()) continue;
+                CucumberStep step = steps.get(i);
+                String status = mapStepStatus(step.getResult() != null ? step.getResult().getStatus() : null);
+                if (worstStatus == null || statusRank(status) > statusRank(worstStatus)) {
+                    worstStatus = status;
+                }
+                if (comment == null && "Fail".equals(status)) {
+                    String errorMessage = step.getResult().getErrorMessage();
+                    if (errorMessage != null && !errorMessage.isBlank()) {
+                        comment = (multipleRows ? "Beispiel " + (row + 1) + ": " : "") + firstLine(errorMessage);
+                    }
                 }
             }
             scriptResults.add(ZephyrScriptResult.builder()
                     .index(i)
-                    .status(mapStepStatus(status))
+                    .status(worstStatus)
                     .comment(comment)
                     .build());
         }
         return scriptResults;
+    }
+
+    /**
+     * Schritt-Status fuer Zephyr-Testfaelle mit Testdaten-Tabelle: Zephyr nummeriert die Schritte ueber
+     * alle Datenzeilen fortlaufend (Zeile 1: 0..n-1, Zeile 2: n..2n-1, ...). Setzt voraus, dass die
+     * Examples-Zeilen in Cucumber und die Datenzeilen in Zephyr dieselbe Reihenfolge haben.
+     */
+    private List<ZephyrScriptResult> buildTestDataScriptResults(List<CucumberElement> elements) {
+        List<ZephyrScriptResult> scriptResults = new ArrayList<>();
+        int index = 0;
+        for (CucumberElement element : elements) {
+            List<CucumberStep> steps = element.getSteps() != null ? element.getSteps() : List.of();
+            for (CucumberStep step : steps) {
+                String status = mapStepStatus(step.getResult() != null ? step.getResult().getStatus() : null);
+                String comment = null;
+                if ("Fail".equals(status)) {
+                    String errorMessage = step.getResult().getErrorMessage();
+                    if (errorMessage != null && !errorMessage.isBlank()) {
+                        comment = firstLine(errorMessage);
+                    }
+                }
+                scriptResults.add(ZephyrScriptResult.builder()
+                        .index(index++)
+                        .status(status)
+                        .comment(comment)
+                        .build());
+            }
+        }
+        return scriptResults.isEmpty() ? null : scriptResults;
+    }
+
+    private static int statusRank(String zephyrStatus) {
+        return switch (zephyrStatus) {
+            case "Fail" -> 2;
+            case "Not Executed" -> 1;
+            default -> 0;
+        };
     }
 
     private static String mapStepStatus(String cucumberStatus) {
@@ -166,12 +295,16 @@ public class CucumberResultReader {
      */
     private static final Pattern TEST_CASE_TAG = Pattern.compile("^@([A-Za-z][A-Za-z0-9]*-)?T-?\\d+$");
 
+    /**
+     * Cucumber vererbt Tags in der Reihenfolge Feature, Rule, Szenario/Outline, Examples. Der letzte
+     * passende Tag ist daher der spezifischste und gewinnt gegen geerbte Feature-/Outline-Keys.
+     */
     private String extractTestCaseKey(List<CucumberTag> tags) {
         if (tags == null) return null;
         return tags.stream()
                 .filter(t -> t.getName() != null && TEST_CASE_TAG.matcher(t.getName()).matches())
                 .map(t -> t.getName().substring(1))
-                .findFirst()
+                .reduce((first, second) -> second)
                 .orElse(null);
     }
 
@@ -202,10 +335,24 @@ public class CucumberResultReader {
     @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
     static class CucumberElement {
+        @JsonProperty("line")
+        private Integer line;
         @JsonProperty("tags")
         private List<CucumberTag> tags;
         @JsonProperty("steps")
         private List<CucumberStep> steps;
+        @JsonProperty("before")
+        private List<CucumberHook> before;
+        @JsonProperty("after")
+        private List<CucumberHook> after;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class CucumberHook {
+        @JsonProperty("result")
+        private CucumberResult result;
     }
 
     @Data

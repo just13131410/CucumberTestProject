@@ -688,6 +688,18 @@ Mehrere Tags werden ODER-verknüpft (`@smoke or @API-Test`):
 ```
 Tag-Ausdrücke mit `and`, `not` oder Klammern werden abgelehnt (400).
 
+**Zuordnung der Ergebnisse zu Zephyr-Testfällen:**
+- Pro Szenario zählt der **letzte** `@T-…`-Tag (bzw. `@PROJ-T…`). Tags vom Feature oder von der
+  Scenario Outline werden so von spezifischeren Tags am Szenario bzw. am `Examples`-Block übersteuert.
+  Mehrere eigene Testfall-Tags an einem Szenario werden nicht unterstützt, nur der letzte erhält das Ergebnis.
+- Alle Beispielzeilen einer Scenario Outline mit demselben Testfall-Key werden zu **einem** Ergebnis
+  zusammengefasst: `Fail`, sobald eine Zeile fehlschlägt. Der Kommentar listet jede Zeile einzeln auf.
+- Schritt-Status: Standardmäßig erhält jeder Skript-Schritt den schlechtesten Status über alle Zeilen.
+  Haben die Zephyr-Testfälle eine Testdaten-Tabelle (Schritte werden je Datenzeile wiederholt),
+  `zephyr.outline-rows-as-test-data=true` setzen: Dann wird der Schritt-Status je Zeile fortlaufend
+  gesendet. Die Reihenfolge der `Examples`-Zeilen muss der der Zephyr-Datenzeilen entsprechen.
+- Ein fehlgeschlagener Before-/After-Hook (z.B. Screenshot) führt ebenfalls zu `Fail`.
+
 ---
 
 ## Fehlerbehebung

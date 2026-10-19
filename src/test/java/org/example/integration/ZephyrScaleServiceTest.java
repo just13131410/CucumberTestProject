@@ -126,6 +126,19 @@ class ZephyrScaleServiceTest {
     }
 
     @Test
+    void uploadRunResults_CycleNameContainsEnvironmentBeforeTags() {
+        stubCycle("T-R1");
+        UUID runId = UUID.randomUUID();
+        TestExecutionRequest request = createRequest(List.of("@SmokeTest", "@API-Test"));
+        request.setEnvironment("feature");
+
+        service.uploadRunResults(runId, request, 0, new TestStatus());
+
+        String expectedSuffix = runId.toString().substring(0, 8) + " feature @SmokeTest @API-Test";
+        verify(zephyrClient).createTestCycle(argThat(m -> ((String) m.get("name")).endsWith(expectedSuffix)));
+    }
+
+    @Test
     void uploadRunResults_ResultFolderConfigured_IncludesFolderPathInBody() {
         ReflectionTestUtils.setField(service, "resultFolder", "/Testautomation/Smoketest");
         stubCycle("T-R1");

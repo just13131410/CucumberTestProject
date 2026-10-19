@@ -1,6 +1,7 @@
 package org.example.steps;
 
 import io.cucumber.java.en.Given;
+import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import io.qameta.allure.Allure;
 import io.qameta.allure.restassured.AllureRestAssured;
@@ -8,6 +9,7 @@ import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
 import org.example.utils.ConfigReader;
 import org.example.utils.RestAssuredSecrets;
+import org.example.utils.TestUsers;
 import org.junit.jupiter.api.Assumptions;
 
 import java.util.Map;
@@ -51,6 +53,29 @@ public class TodoApiSteps {
         if (response.getStatusCode() == 200) {
             jwtToken = response.jsonPath().getString("token");
         }
+    }
+
+    @When("ich mich an der Todo-API als Rolle {string} anmelde")
+    public void loginWithRole(String role) {
+        TestUsers.Credentials credentials = TestUsers.forRole("todo", role);
+        loginWithCredentials(credentials.username(), credentials.password());
+    }
+
+    @When("ich mich an der Todo-API als Rolle {string} mit falschem Passwort anmelde")
+    public void loginWithRoleAndWrongPassword(String role) {
+        TestUsers.Credentials credentials = TestUsers.forRole("todo", role);
+        loginWithCredentials(credentials.username(), credentials.password() + "-falsch");
+    }
+
+    @Given("ich bin als Rolle {string} in der Todo-API eingeloggt")
+    public void loginWithRoleAndStoreToken(String role) {
+        TestUsers.Credentials credentials = TestUsers.forRole("todo", role);
+        loginAndStoreToken(credentials.username(), credentials.password());
+    }
+
+    @Then("enthält das JSON-Feld {string} den Benutzernamen der Rolle {string}")
+    public void verifyJsonFieldIsUsernameOfRole(String field, String role) {
+        assertions.verifyJsonFieldEqualsString(field, TestUsers.forRole("todo", role).username());
     }
 
     @Given("ich bin als {string} mit Passwort {string} in der Todo-API eingeloggt")

@@ -2,6 +2,7 @@ package org.example.cucumber.controller;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.cucumber.service.CapacityExceededException;
+import org.example.cucumber.service.UnknownEnvironmentException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,5 +27,12 @@ public class ApiExceptionHandler {
         log.warn("Anfrage abgelehnt (429): {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(Map.of("error", "capacity_exceeded", "message", e.getMessage()));
+    }
+
+    @ExceptionHandler(UnknownEnvironmentException.class)
+    public ResponseEntity<Map<String, String>> handleUnknownEnvironment(UnknownEnvironmentException e) {
+        log.warn("Anfrage abgelehnt (400): {}", e.getMessage());
+        return ResponseEntity.badRequest()
+                .body(Map.of("error", "unknown_environment", "message", e.getMessage()));
     }
 }

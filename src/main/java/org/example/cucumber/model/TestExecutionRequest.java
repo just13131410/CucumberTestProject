@@ -44,10 +44,14 @@ public class TestExecutionRequest {
     /** Zephyr-Testrun-Key, z.B. {@code PROJ-R1} oder {@code PROJ-C15}; schließt Pfad-Injection aus. */
     static final String TEST_RUN_KEY_PATTERN = "^[A-Z][A-Z0-9_]{1,9}-[A-Z]?\\d+$";
 
+    /** Umgebungsname, Teil von Konfigurations-Keys ({@code env.<name>.baseUrl}); schließt Key-Injection aus. */
+    static final String ENVIRONMENT_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]{0,29}$";
+
     @NotBlank(message = "Environment darf nicht leer sein")
-    @Pattern(regexp = "dev|staging|prod|performance",
-            message = "Environment muss dev, staging, prod oder performance sein")
-    @Schema(description = "Ziel-Umgebung fuer die Tests",
+    // Nur das Format; ob die Umgebung erlaubt ist, prüft der Controller gegen test.environments.
+    @Pattern(regexp = ENVIRONMENT_PATTERN,
+            message = "Environment darf nur A-Z, a-z, 0-9, _ und - enthalten (max. 30 Zeichen)")
+    @Schema(description = "Ziel-Umgebung fuer die Tests (eine der in test.environments konfigurierten)",
             example = "dev",
             requiredMode = Schema.RequiredMode.REQUIRED)
     private String environment;

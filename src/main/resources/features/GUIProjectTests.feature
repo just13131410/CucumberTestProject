@@ -8,7 +8,7 @@ Funktionalität: Vorgangs-Dashboard
   @smoketest
   Szenario: Erfolgreicher Login und Anzeige der Tabelle
     Gegeben sei ich öffne die Login-Seite
-    Wenn ich mich mit Benutzername "admin" und Passwort "admin" einlogge
+    Wenn ich mich als Rolle "admin" einlogge
     Dann sollte ich das Dashboard sehen
     Und die Tabelle sollte mindestens eine Zeile mit Daten enthalten
 

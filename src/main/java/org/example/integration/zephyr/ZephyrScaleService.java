@@ -195,7 +195,8 @@ public class ZephyrScaleService {
         String shortRunId = runId.toString().substring(0, 8);
         String tags = request.getTags() != null ? String.join(" ", request.getTags()) : "";
         String date = LocalDate.now().format(DATE_FMT);
-        String cycleName = (date + " " + shortRunId + (tags.isBlank() ? "" : " " + tags)).trim();
+        String environment = request.getEnvironment() != null ? request.getEnvironment() : "";
+        String cycleName = String.join(" ", date, shortRunId, environment, tags).replaceAll("\\s+", " ").trim();
 
         String folder = resolveResultFolder(request);
         Map<String, Object> body = new HashMap<>();

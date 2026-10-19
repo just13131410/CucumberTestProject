@@ -53,7 +53,7 @@ class TestExecutionRequestTest {
     @Test
     void invalidEnvironment_ViolatesPattern() {
         TestExecutionRequest request = TestExecutionRequest.builder()
-                .environment("invalid-env")
+                .environment("../dev")
                 .tags(List.of("@smoke"))
                 .build();
 
@@ -66,7 +66,7 @@ class TestExecutionRequestTest {
 
     @Test
     void allValidEnvironments_NoViolations() {
-        for (String env : List.of("dev", "staging", "prod", "performance")) {
+        for (String env : List.of("dev", "feature", "test", "int-A_2")) {
             TestExecutionRequest request = TestExecutionRequest.builder()
                     .environment(env)
                     .tags(List.of("@smoke"))

@@ -21,6 +21,65 @@ class BrowserLaunchPlanTest {
         System.clearProperty("playwright.mode");
         System.clearProperty("playwright.mirror.enabled");
         System.clearProperty("playwright.remote.channel");
+        System.clearProperty("browser.treat-base-url-as-secure");
+        System.clearProperty("env.planenv.baseUrl");
+        System.clearProperty("test.environment");
+    }
+
+    // ---- Secure Context für http-Ziele ----
+
+    @Test
+    void originOf_HttpUrlWithPathAndPort_ReturnsOrigin() {
+        assertEquals("http://angular-gui:8080", BrowserLaunchPlan.originOf("http://angular-gui:8080/app/"));
+        assertEquals("http://gui.feature.svc", BrowserLaunchPlan.originOf(" http://gui.feature.svc/ "));
+    }
+
+    @Test
+    void originOf_HttpsLocalhostOrInvalid_ReturnsNull() {
+        assertNull(BrowserLaunchPlan.originOf("https://gui.example.com/"));
+        assertNull(BrowserLaunchPlan.originOf("http://localhost:4200/"));
+        assertNull(BrowserLaunchPlan.originOf("http://127.0.0.1:4200/"));
+        assertNull(BrowserLaunchPlan.originOf("kein url"));
+        assertNull(BrowserLaunchPlan.originOf(null));
+    }
+
+    @Test
+    void withSecureOrigin_MergesWithConfiguredFlagAndKeepsOtherArgs() {
+        BrowserConfig config = new BrowserConfig("", true,
+                "--no-zygote,--unsafely-treat-insecure-origin-as-secure=http://alt:8080");
+        BrowserLaunchPlan plan = BrowserLaunchPlan.resolve("chromium", config, true, false, null, null, "chromium")
+                .withSecureOrigin("http://neu:8080");
+
+        assertEquals(List.of("--no-zygote",
+                "--unsafely-treat-insecure-origin-as-secure=http://alt:8080,http://neu:8080"), plan.args());
+    }
+
+    @Test
+    void withSecureOrigin_NullOrigin_LeavesPlanUnchanged() {
+        BrowserLaunchPlan plan = BrowserLaunchPlan.resolve("chromium", headlessWithArgs, true, false, null, null, null);
+
+        assertSame(plan, plan.withSecureOrigin(null));
+    }
+
+    @Test
+    void fromConfig_TreatBaseUrlAsSecure_UsesBaseUrlOfActiveEnvironment() {
+        System.setProperty("playwright.mode", "remote");
+        System.setProperty("browser.treat-base-url-as-secure", "true");
+        System.setProperty("env.planenv.baseUrl", "http://gui-planenv:8080/");
+        System.setProperty("test.environment", "planenv");
+
+        BrowserLaunchPlan plan = BrowserLaunchPlan.fromConfig("chromium", plain);
+
+        assertEquals(List.of("--unsafely-treat-insecure-origin-as-secure=http://gui-planenv:8080"), plan.args());
+    }
+
+    @Test
+    void fromConfig_TreatBaseUrlAsSecureDisabled_AddsNoFlag() {
+        System.setProperty("playwright.mode", "remote");
+        System.setProperty("env.planenv.baseUrl", "http://gui-planenv:8080/");
+        System.setProperty("test.environment", "planenv");
+
+        assertTrue(BrowserLaunchPlan.fromConfig("chromium", plain).args().isEmpty());
     }
 
     // ---- Modus-Auswahl und Priorität ----

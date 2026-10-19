@@ -18,10 +18,11 @@
    - [Statistiken](#10-statistiken-abrufen)
    - [Verfügbare Runs auflisten](#11-verfügbare-runs-auflisten)
    - [Kombinierten Report generieren](#12-kombinierten-allure-report-generieren)
-5. [Typischer Workflow](#typischer-workflow)
-6. [Parallele Ausführung](#parallele-ausführung-mehrere-teams)
-7. [Verfügbare Tags](#verfügbare-test-tags)
-8. [Fehlerbehebung](#fehlerbehebung)
+5. [Ziel-Umgebungen](#ziel-umgebungen)
+6. [Typischer Workflow](#typischer-workflow)
+7. [Parallele Ausführung](#parallele-ausführung-mehrere-teams)
+8. [Verfügbare Tags](#verfügbare-test-tags)
+9. [Fehlerbehebung](#fehlerbehebung)
 
 ---
 
@@ -95,7 +96,7 @@ Content-Type: application/json
 
 | Feld                  | Typ              | Pflicht | Beschreibung                                           |
 |-----------------------|------------------|---------|--------------------------------------------------------|
-| `environment`         | String           | Ja      | Ziel-Umgebung: `dev`, `staging`, `prod`, `performance` |
+| `environment`         | String           | Ja      | Ziel-Umgebung, eine der in `test.environments` konfigurierten (Standard: `dev`, `feature`, `test`), siehe [Ziel-Umgebungen](#ziel-umgebungen) |
 | `tags`                | Liste (Strings)  | Ja      | Einfache Cucumber-Tags (`@smoke`, `API-Test`), ODER-verknüpft, max. 20. Tag-Ausdrücke wie `@a and not @b` werden mit 400 abgelehnt |
 | `features`            | Liste (Strings)  | Nein    | Feature-Dateien relativ zu `features/`, optional mit Zeilennummer: `GUIProjectTests.feature`, `API-Test.feature:12`. Keine absoluten Pfade, kein `..`, max. 50 |
 | `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `chrome`, `firefox`, `webkit` |
@@ -128,7 +129,7 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
 curl -X POST http://localhost:8080/api/v1/test/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "environment": "staging",
+    "environment": "feature",
     "tags": ["@API-Test"],
     "features": ["API-Test.feature", "Todo-API-Test.feature"]
   }'
@@ -147,7 +148,7 @@ fehl ("Testfall nicht im Testrun gefunden"). Dazu `zephyrTemplateTestRunKey` (un
 curl -X POST http://localhost:8080/api/v1/test/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "environment": "staging",
+    "environment": "feature",
     "tags": ["@API-Test"],
     "projectKey": "PROJ",
     "zephyrTemplateTestRunKey": "PROJ-C15",
@@ -166,9 +167,9 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   }'
 ```
 
-Die Ziel-URL der UI-Tests (`baseUrl`) wird pro Deployment gesetzt (Umgebungsvariable `BASEURL`).
-Pro Lauf lässt sie sich per `"environmentVariables": {"baseUrl": "https://meine-app.example.com/"}`
-überschreiben, sofern im Pod keine Umgebungsvariable `BASEURL` gesetzt ist (die hat Vorrang).
+Die Ziel-URLs und Zugangsdaten hängen an `environment` (siehe [Ziel-Umgebungen](#ziel-umgebungen)).
+Einzelne Werte lassen sich zusätzlich per `"environmentVariables": {"baseUrl": "https://meine-app.example.com/"}`
+überschreiben, sofern im Pod keine gleichnamige Umgebungsvariable (`BASEURL`) gesetzt ist (die hat Vorrang).
 
 **Response (202 Accepted):**
 ```json
@@ -188,6 +189,7 @@ Pro Lauf lässt sie sich per `"environmentVariables": {"baseUrl": "https://meine
 | Code | Bedeutung                                      |
 |------|-------------------------------------------------|
 | 400  | Ungültige Parameter (z.B. fehlende Tags, Tag-Ausdruck, ungültiger Feature-Pfad oder Zephyr-Key) |
+| 400  | Unbekannte Umgebung (`"error": "unknown_environment"`, die Meldung nennt die erlaubten) |
 | 429  | Kapazität erschöpft: ein Lauf aktiv und Warteschlange voll |
 | 500  | Interner Serverfehler                           |
 
@@ -269,7 +271,7 @@ curl http://localhost:8080/api/v1/test/active
   {
     "runId": "660f9511-f39c-52e5-b827-557766551111",
     "status": "QUEUED",
-    "environment": "staging"
+    "environment": "feature"
   }
 ]
 ```
@@ -457,7 +459,7 @@ GET /api/v1/test/statistics?environment=dev
 curl http://localhost:8080/api/v1/test/statistics
 
 # Nur für eine bestimmte Umgebung:
-curl http://localhost:8080/api/v1/test/statistics?environment=staging
+curl http://localhost:8080/api/v1/test/statistics?environment=feature
 ```
 
 **Response (200):**
@@ -564,6 +566,57 @@ curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
 
 ---
 
+## Ziel-Umgebungen
+
+Ein Service-Deployment kann mehrere Umgebungen testen. Welche erlaubt sind, legt
+`test.environments` fest (Umgebungsvariable `TEST_ENVIRONMENTS`, kommagetrennt, Namen frei wählbar,
+Standard `dev,feature,test`). Andere Werte für `environment` werden mit 400 abgelehnt.
+
+Während eines Laufs sucht der Service jeden Konfigurationswert zuerst als
+`env.<umgebung>.<key>` und erst danach als globalen `<key>`. Nicht gepflegte Werte gelten also aus
+der globalen Konfiguration, und `dev` läuft ohne `env.dev.*` wie bisher.
+
+| Wert                     | Property (Beispiel `feature`)              | Umgebungsvariable                     |
+|--------------------------|--------------------------------------------|---------------------------------------|
+| FE-URL (GUI)             | `env.feature.baseUrl`                      | `ENV_FEATURE_BASEURL`                 |
+| BE-URL                   | `env.feature.backendUrl`                   | `ENV_FEATURE_BACKENDURL`              |
+| OAuth-Token-Endpoint     | `env.feature.oauth.token-url`              | `ENV_FEATURE_OAUTH_TOKEN_URL`         |
+| OAuth-Client             | `env.feature.oauth.client-id` / `.client-secret` | `ENV_FEATURE_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` |
+| Todo-API-URL             | `env.feature.todoApiUrl`                   | `ENV_FEATURE_TODOAPIURL`              |
+| GitHub-API-URL / Token   | `env.feature.apiURL`, `env.feature.api.token` | `ENV_FEATURE_APIURL`, `ENV_FEATURE_API_TOKEN` |
+| GUI-Nutzer einer Rolle   | `env.feature.gui.user.<rolle>.username` / `.password` | `ENV_FEATURE_GUI_USER_<ROLLE>_USERNAME` / `_PASSWORD` |
+| Todo-API-Nutzer          | `env.feature.todo.user.<rolle>.username` / `.password` | `ENV_FEATURE_TODO_USER_<ROLLE>_USERNAME` / `_PASSWORD` |
+
+Bindestriche im Umgebungsnamen werden in der Umgebungsvariable zu `_` (`int-a` → `ENV_INT_A_BASEURL`).
+Passwörter gehören in Secrets (CONFIGPATH-Dateien oder Umgebungsvariablen aus einem Secret), nicht in
+die ConfigMap und nicht in den Request.
+
+**Nutzer und Rollen:** Die Features enthalten keine Zugangsdaten mehr, sondern Rollen, z.B.
+`Wenn ich mich als Rolle "admin" einlogge`, `Gegeben sei ich bin als Rolle "admin" auf dem Dashboard eingeloggt`
+oder `Given ich bin als Rolle "admin" in der Todo-API eingeloggt`. Für eine neue Rolle genügt es,
+`<system>.user.<rolle>.username/password` (global) bzw. `env.<umgebung>.…` zu setzen. Fehlt ein Wert,
+schlägt das Szenario mit einer Meldung fehl, die die erwarteten Keys nennt.
+
+Die GUI-Rollen heißen in der Konfiguration `superuser`, `admin` und `facharbeiter`
+(z.B. `ENV_TEST_GUI_USER_FACHARBEITER_PASSWORD`).
+
+**Backend mit OAuth:** Die Backend-Steps holen sich vorher ein Token vom OAuth-Server
+(`Given ich habe ein OAuth-Token für das Backend`, danach z.B. `When ich GET an "/api/..." im Backend ausführe`).
+`oauth.grant-type` ist `client_credentials` (Standard) oder `password` (dann zusätzlich `oauth.username`/
+`oauth.password`), optional `oauth.scope`. Zephyr ist davon unabhängig und für alle Umgebungen gleich.
+
+**Ziele per HTTP:** Mit `BROWSER_TREAT_BASE_URL_AS_SECURE=true` behandelt der Browser den Origin der
+`baseUrl` des Laufs als Secure Context (nötig für `crypto.randomUUID()`/Clipboard der Angular-App,
+wirkt nur mit `PLAYWRIGHT_REMOTE_CHANNEL=chromium`). Bei HTTPS-Zielen und `localhost` passiert nichts.
+
+Die Umgebung steht außerdem im Namen des Zephyr-Testzyklus (`<datum> <runId> <umgebung> <tags>`).
+
+**Einschränkung:** Die Umgebung gilt prozessweit für den laufenden Lauf (System-Property). Bei
+`test.execution.max-concurrent-runs` > 1 im `in-process`-Modus können sich gleichzeitige Läufe
+gegenseitig beeinflussen. Mit dem Standard (1 Lauf gleichzeitig) oder im `subprocess`-Modus nicht.
+
+---
+
 ## Typischer Workflow
 
 ```
@@ -658,7 +711,7 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
 curl -X POST http://localhost:8080/api/v1/test/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "environment": "staging",
+    "environment": "feature",
     "tags": ["@API-Test"]
   }'
 ```

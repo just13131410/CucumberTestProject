@@ -556,6 +556,17 @@ class TestExecutionServiceTest {
     // --- Request-Overrides: alles außer JVM-/Framework-Präfixen ---
 
     @Test
+    void runProperties_ContainsEnvironmentAndWinsOverRequestOverride() {
+        TestExecutionRequest request = createRequest("feature", List.of("@smoke"));
+        request.setEnvironmentVariables(Map.of("test.environment", "dev", "baseUrl", "http://x/"));
+
+        Map<String, String> props = TestExecutionService.runProperties(request);
+
+        assertEquals("feature", props.get("test.environment"));
+        assertEquals("http://x/", props.get("baseUrl"));
+    }
+
+    @Test
     void filterOverrides_PassesApplicationKeys() {
         Map<String, String> requested = new java.util.LinkedHashMap<>();
         requested.put("TEST_ENV", "qa");

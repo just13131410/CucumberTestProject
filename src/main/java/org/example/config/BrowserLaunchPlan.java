@@ -2,9 +2,15 @@ package org.example.config;
 
 import org.example.utils.ConfigReader;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Entscheidet ohne Browser-Abhängigkeit, wie ein Browser bereitgestellt wird. {@code BasePage}
@@ -52,11 +58,66 @@ public record BrowserLaunchPlan(
     /** Plan aus der aktuellen Konfiguration ({@link PlaywrightRemoteConfig}, {@link PlaywrightMirrorConfig}, {@link ConfigReader}). */
     public static BrowserLaunchPlan fromConfig(String browser, BrowserConfig browserConfig) {
         boolean remote = PlaywrightRemoteConfig.isRemoteEnabled();
-        return resolve(browser, browserConfig, remote,
+        BrowserLaunchPlan plan = resolve(browser, browserConfig, remote,
                 !remote && PlaywrightMirrorConfig.isMirrorEnabled(),
                 ConfigReader.get("browser.executable.path", browserConfig.getExecutablePath()),
                 PlaywrightMirrorConfig.browsersPath(),
                 PlaywrightRemoteConfig.channel());
+        if (Boolean.parseBoolean(ConfigReader.get(TREAT_BASE_URL_AS_SECURE, "false"))) {
+            return plan.withSecureOrigin(originOf(ConfigReader.get("baseUrl", null)));
+        }
+        return plan;
+    }
+
+    /**
+     * Schalter für Ziele per {@code http://} (z.B. Service-URL in OpenShift): Ohne Secure Context fehlen
+     * {@code crypto.randomUUID()}/Clipboard. Wirkt nur im vollen Chromium ({@code channel=chromium}),
+     * die Headless-Shell ignoriert das Flag.
+     */
+    static final String TREAT_BASE_URL_AS_SECURE = "browser.treat-base-url-as-secure";
+    static final String INSECURE_ORIGIN_FLAG = "--unsafely-treat-insecure-origin-as-secure=";
+
+    /**
+     * Origin ({@code http://host[:port]}) einer {@code http}-URL, sonst {@code null}: HTTPS und
+     * localhost sind ohnehin Secure Context, ungültige URLs werden ignoriert.
+     */
+    static String originOf(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        try {
+            URI uri = new URI(url.strip());
+            String host = uri.getHost();
+            if (!"http".equalsIgnoreCase(uri.getScheme()) || host == null
+                    || host.equalsIgnoreCase("localhost") || host.equals("127.0.0.1")) {
+                return null;
+            }
+            return "http://" + host + (uri.getPort() > 0 ? ":" + uri.getPort() : "");
+        } catch (URISyntaxException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Ergänzt {@code origin} im Insecure-Origin-Flag. Chromium wertet das Flag nur einmal aus, daher
+     * werden bereits konfigurierte Origins (aus {@code browser.extra.args}) in ein Flag zusammengeführt.
+     */
+    BrowserLaunchPlan withSecureOrigin(String origin) {
+        if (origin == null) {
+            return this;
+        }
+        Set<String> origins = new LinkedHashSet<>();
+        List<String> mergedArgs = new ArrayList<>();
+        for (String arg : args) {
+            if (arg.startsWith(INSECURE_ORIGIN_FLAG)) {
+                origins.addAll(Arrays.asList(arg.substring(INSECURE_ORIGIN_FLAG.length()).split(",")));
+            } else {
+                mergedArgs.add(arg);
+            }
+        }
+        origins.add(origin);
+        mergedArgs.add(INSECURE_ORIGIN_FLAG + String.join(",", origins));
+        return new BrowserLaunchPlan(browserName, mode, driverEnv, headless, mergedArgs, executablePath, channel);
     }
 
     /**

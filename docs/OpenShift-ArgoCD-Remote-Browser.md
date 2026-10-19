@@ -128,11 +128,12 @@ Abhilfe, nur bei HTTP-Zielen:
 
 ```yaml
   PLAYWRIGHT_REMOTE_CHANNEL: "chromium"   # volles Chromium; die Headless-Shell ignoriert das Flag
-  # ACHTUNG: überschreibt browser.extra.args aus dem prod-Profil → dessen Werte mit aufnehmen
-  BROWSER_EXTRA_ARGS: "--no-zygote,--disable-crash-reporter,--disable-gpu,--unsafely-treat-insecure-origin-as-secure=http://<ziel-host>:<port>"
+  BROWSER_TREAT_BASE_URL_AS_SECURE: "true"
 ```
 
-Bei einem HTTPS-Ziel (z.B. über eine Route) entfällt beides.
+Der Service setzt dann beim Browser-Start `--unsafely-treat-insecure-origin-as-secure=<origin>` aus der
+`baseUrl` der Ziel-Umgebung des Laufs (`ENV_<UMGEBUNG>_BASEURL` bzw. `BASEURL`). Bei einem HTTPS-Ziel
+(z.B. über eine Route) oder `localhost` fügt er kein Flag hinzu.
 
 ### 4.3 HTTP-Proxy im Unternehmen
 

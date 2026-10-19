@@ -144,9 +144,11 @@ curl -s -X POST http://localhost:8080/api/v1/test/execute -H 'Content-Type: appl
 ```
 Im Manifest gesetzt (alle per `x-playwright-launch-options` an den Server durchgereicht):
 `BROWSER_HEADLESS=true` (explizit; das dev-Profil würde `false` setzen → kein X-Server), sowie
-`PLAYWRIGHT_REMOTE_CHANNEL=chromium` + `BROWSER_EXTRA_ARGS=--unsafely-treat-insecure-origin-as-secure=http://angular-gui:8080`:
-Die Angular-App nutzt `crypto.randomUUID()`, das es nur im Secure Context (HTTPS/localhost) gibt.
-Das Flag wirkt nur im vollen Chromium, nicht in der Headless-Shell. Bei HTTPS-Zielen entfällt beides.
+`PLAYWRIGHT_REMOTE_CHANNEL=chromium` + `BROWSER_TREAT_BASE_URL_AS_SECURE=true`: Der Service hängt
+`--unsafely-treat-insecure-origin-as-secure=<origin der baseUrl>` beim Browser-Start an, passend zur
+Ziel-Umgebung des Laufs. Die Angular-App nutzt `crypto.randomUUID()`, das es nur im Secure Context
+(HTTPS/localhost) gibt. Das Flag wirkt nur im vollen Chromium, nicht in der Headless-Shell. Bei
+HTTPS-Zielen fügt der Service kein Flag hinzu.
 
 **Sidecar-Probes:** `startupProbe` + `livenessProbe` als `exec` (`node -e` → `GET http://127.0.0.1:3000/`
 liefert `200 "Running"`), weil der Server nur auf localhost lauscht. Ein hängender Server wird nach

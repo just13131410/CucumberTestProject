@@ -30,6 +30,16 @@ data:
   TODOAPIURL: "http://allure-todo-api:3000"
   # PDF-Quelle für ApiSteps (HTTP-Basis-URL zum PVC-Verzeichnis auf OpenShift)
   PDF_BASE_URL: "https://cucumber-test-service-test-automation.apps-crc.testing/reports"
+  # ---- Ziel-Umgebungen ("environment" im Request), Namen frei wählbar ----
+  TEST_ENVIRONMENTS: "dev,feature,test"
+  # Werte je Umgebung: ENV_<UMGEBUNG>_<KEY> hat während des Laufs Vorrang vor <KEY> (z.B. BASEURL).
+  # Zugangsdaten (ENV_<UMGEBUNG>_GUI_USER_<ROLLE>_PASSWORD usw.) gehören ins Secret, nicht hierher.
+  # ENV_FEATURE_BASEURL: "http://gui.feature-namespace.svc:8080/"
+  # ENV_FEATURE_BACKENDURL: "http://backend.feature-namespace.svc:8080"
+  # ENV_FEATURE_OAUTH_TOKEN_URL: "https://sso.example.com/realms/feature/protocol/openid-connect/token"
+  # ENV_TEST_BASEURL: "http://gui.test-namespace.svc:8080/"
+  # Ziele per http:// → Origin der baseUrl als Secure Context (nur mit PLAYWRIGHT_REMOTE_CHANNEL=chromium)
+  BROWSER_TREAT_BASE_URL_AS_SECURE: "true"
   # Actuator on separate port
   MANAGEMENT_SERVER_PORT: "8081"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"

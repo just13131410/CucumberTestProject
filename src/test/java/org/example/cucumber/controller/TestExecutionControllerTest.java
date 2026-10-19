@@ -1,5 +1,6 @@
 package org.example.cucumber.controller;
 
+import org.example.config.TestEnvironments;
 import org.example.cucumber.model.RunState;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -44,7 +45,8 @@ class TestExecutionControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new TestExecutionController(testExecutionService, new ReportUrlResolver());
+        controller = new TestExecutionController(testExecutionService, new ReportUrlResolver(),
+                new TestEnvironments("dev,feature"));
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -281,5 +283,29 @@ class TestExecutionControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"environment\":\"dev\",\"tags\":[\"@smoke\"],\"features\":[\"../x.feature\"]}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void executeTests_UnknownEnvironment_Returns400WithAllowedNames() throws Exception {
+        mockMvc.perform(post("/api/v1/test/execute")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"environment\":\"staging\",\"tags\":[\"@smoke\"]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("unknown_environment"))
+                .andExpect(jsonPath("$.message").value(containsString("dev, feature")));
+
+        verifyNoInteractions(testExecutionService);
+    }
+
+    @Test
+    void executeTests_ConfiguredNonDevEnvironment_Returns202() throws Exception {
+        when(testExecutionService.queueTestExecution(any())).thenReturn(TestExecutionResponse.builder()
+                .runId(TEST_RUN_ID).status(RunState.QUEUED).environment("feature").build());
+
+        mockMvc.perform(post("/api/v1/test/execute")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"environment\":\"feature\",\"tags\":[\"@smoke\"]}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.environment").value("feature"));
     }
 }

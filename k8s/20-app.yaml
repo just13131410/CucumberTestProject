@@ -92,8 +92,14 @@ spec:
             # nur im vollen Chromium (channel=chromium), die Headless-Shell ignoriert es.
             - name: PLAYWRIGHT_REMOTE_CHANNEL
               value: "chromium"
-            - name: BROWSER_EXTRA_ARGS
-              value: "--unsafely-treat-insecure-origin-as-secure=http://angular-gui:8080"
+            # Origin der baseUrl der jeweiligen Ziel-Umgebung als Secure Context behandeln
+            # (ersetzt das feste --unsafely-treat-insecure-origin-as-secure in BROWSER_EXTRA_ARGS).
+            - name: BROWSER_TREAT_BASE_URL_AS_SECURE
+              value: "true"
+            # Erlaubte Ziel-Umgebungen; URLs/Zugangsdaten je Umgebung als ENV_<UMGEBUNG>_<KEY>,
+            # z.B. ENV_FEATURE_BASEURL, ENV_FEATURE_GUI_USER_ADMIN_PASSWORD (Passwörter aus einem Secret).
+            - name: TEST_ENVIRONMENTS
+              value: "dev,feature,test"
             - name: MANAGEMENT_SERVER_PORT
               value: "8081"
             # ---- Native-Speicher zähmen (glibc-Malloc-Arenen), höchster ROI, risikolos ----

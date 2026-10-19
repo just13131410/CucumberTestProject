@@ -1,9 +1,11 @@
 package org.example.cucumber.controller;
 
+import org.example.config.TestEnvironments;
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
 import org.example.cucumber.service.TestExecutionService;
+import org.example.cucumber.service.UnknownEnvironmentException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -40,6 +42,7 @@ public class TestExecutionController {
 
     private final TestExecutionService testExecutionService;
     private final ReportUrlResolver urlResolver;
+    private final TestEnvironments testEnvironments;
 
     /**
      * Startet eine neue Test-Ausführung
@@ -63,6 +66,11 @@ public class TestExecutionController {
 
         log.info("Received test execution request: environment={}, tags={}, features={}",
                 request.getEnvironment(), request.getTags(), request.getFeatures());
+
+        if (!testEnvironments.isKnown(request.getEnvironment())) {
+            throw new UnknownEnvironmentException("Unbekannte Umgebung '" + request.getEnvironment()
+                    + "', erlaubt: " + String.join(", ", testEnvironments.names()));
+        }
 
         try {
             TestExecutionResponse response = testExecutionService.queueTestExecution(request);

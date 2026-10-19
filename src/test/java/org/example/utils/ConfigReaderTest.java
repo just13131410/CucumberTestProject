@@ -18,6 +18,61 @@ class ConfigReaderTest {
         System.clearProperty("testKey");
         System.clearProperty("baseUrl");
         System.clearProperty("app.test.key");
+        System.clearProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY);
+        System.clearProperty("env.cfgtest.envTestKey");
+        System.clearProperty("envTestKey");
+    }
+
+    @Test
+    void get_ActiveEnvironment_PrefersEnvironmentSpecificKey() {
+        System.setProperty("envTestKey", "global");
+        System.setProperty("env.cfgtest.envTestKey", "feature-wert");
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "cfgtest");
+
+        ConfigReader.ResolvedValue resolved = ConfigReader.getWithSource("envTestKey", "default");
+
+        assertEquals("feature-wert", resolved.value());
+        assertTrue(resolved.source().endsWith("für Umgebung 'cfgtest'"), resolved.source());
+    }
+
+    @Test
+    void get_ActiveEnvironmentWithoutSpecificKey_FallsBackToGlobalKey() {
+        System.setProperty("envTestKey", "global");
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "cfgtest");
+
+        assertEquals("global", ConfigReader.get("envTestKey", "default"));
+    }
+
+    @Test
+    void get_ActiveEnvironmentWithoutAnyKey_ReturnsDefault() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "cfgtest");
+
+        assertEquals("default", ConfigReader.get("envTestKey", "default"));
+    }
+
+    @Test
+    void get_NoActiveEnvironment_IgnoresEnvironmentSpecificKey() {
+        System.setProperty("envTestKey", "global");
+        System.setProperty("env.cfgtest.envTestKey", "feature-wert");
+
+        assertEquals("global", ConfigReader.get("envTestKey", "default"));
+    }
+
+    @Test
+    void get_BlankActiveEnvironment_TreatedAsNotSet() {
+        System.setProperty("envTestKey", "global");
+        System.setProperty("env.cfgtest.envTestKey", "feature-wert");
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "  ");
+
+        assertEquals("global", ConfigReader.get("envTestKey", "default"));
+    }
+
+    @Test
+    void environmentKey_MapsToExpectedPropertyAndEnvVarName() {
+        assertEquals("env.feature.baseUrl", ConfigReader.environmentKey("feature", "baseUrl"));
+        assertEquals("ENV_FEATURE_BASEURL", ConfigReader.toEnvKey(ConfigReader.environmentKey("feature", "baseUrl")));
+        assertEquals("ENV_MY_TEST_GUI_USER_ADMIN_PASSWORD",
+                ConfigReader.toEnvKey(ConfigReader.environmentKey("my-test", "gui.user.admin.password")));
     }
 
     @Test

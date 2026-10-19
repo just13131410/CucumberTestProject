@@ -7,6 +7,7 @@ import org.example.cucumber.model.RunState;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.zephyr.ZephyrScaleService;
+import org.example.utils.ConfigReader;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -287,10 +288,14 @@ public class TestExecutionService {
 
     /**
      * Run-spezifische Properties eines Requests: gefilterte Env-Variablen ({@link #filterOverrides})
-     * plus Browser und Headless.
+     * plus Browser, Headless und Ziel-Umgebung (für umgebungsspezifische Keys im {@link ConfigReader};
+     * schlägt einen gleichnamigen Override aus {@code environmentVariables}).
      */
     static Map<String, String> runProperties(TestExecutionRequest request) {
         Map<String, String> toSet = filterOverrides(request.getEnvironmentVariables());
+        if (request.getEnvironment() != null) {
+            toSet.put(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, request.getEnvironment());
+        }
         if (request.getBrowser() != null) {
             toSet.put("browser", request.getBrowser());
         }

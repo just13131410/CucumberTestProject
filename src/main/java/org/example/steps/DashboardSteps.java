@@ -13,6 +13,7 @@ import org.example.config.PlaywrightBrowserInstaller;
 import org.example.hooks.AxeReportHook;
 import org.example.pages.BasePage;
 import org.example.utils.ConfigReader;
+import org.example.utils.TestUsers;
 
 import java.util.regex.Pattern;
 
@@ -71,6 +72,12 @@ public class DashboardSteps extends BasePage {
         page.click("button[type=\"submit\"]");
     }
 
+    @Wenn("ich mich als Rolle {string} einlogge")
+    public void ich_mich_als_rolle_einlogge(String role) {
+        TestUsers.Credentials credentials = TestUsers.forRole("gui", role);
+        ich_mich_mit_benutzername_und_passwort_einlogge(credentials.username(), credentials.password());
+    }
+
     @Dann("sollte ich das Dashboard sehen")
     public void sollte_ich_das_dashboard_sehen() {
         assertThat(page).hasURL(Pattern.compile(".*dashboard"));
@@ -89,9 +96,15 @@ public class DashboardSteps extends BasePage {
 
     @Gegebensei("ich bin auf dem Dashboard eingeloggt")
     public void ich_bin_auf_dem_dashboard_eingeloggt() {
+        ich_bin_als_rolle_auf_dem_dashboard_eingeloggt("admin");
+    }
+
+    @Gegebensei("ich bin als Rolle {string} auf dem Dashboard eingeloggt")
+    public void ich_bin_als_rolle_auf_dem_dashboard_eingeloggt(String role) {
+        TestUsers.Credentials credentials = TestUsers.forRole("gui", role);
         page.navigate(baseUrl + "login");
-        page.fill("input[name=\"username\"]", "admin");
-        page.fill("input[name=\"password\"]", "admin");
+        page.fill("input[name=\"username\"]", credentials.username());
+        page.fill("input[name=\"password\"]", credentials.password());
         page.click("button[type=\"submit\"]");
         assertThat(page).hasURL(Pattern.compile(".*dashboard"));
         page.waitForSelector("table");

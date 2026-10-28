@@ -1,6 +1,7 @@
 package org.example.steps;
 
 import io.cucumber.java.en.Given;
+import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import io.qameta.allure.Allure;
 import io.qameta.allure.restassured.AllureRestAssured;
@@ -8,6 +9,7 @@ import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
 import org.example.utils.ConfigReader;
 import org.example.utils.RestAssuredSecrets;
+import org.example.utils.TestUsers;
 import org.junit.jupiter.api.Assumptions;
 
 import java.util.Map;
@@ -39,7 +41,10 @@ public class TodoApiSteps {
 
     @When("ich mich an der Todo-API mit Benutzername {string} und Passwort {string} anmelde")
     public void loginWithCredentials(String username, String password) {
-        Response response = todoRequest()
+        // Ohne AllureRestAssured-Filter: der Request-Body enthielte das Passwort im Klartext im Report.
+        Response response = given()
+                .config(RestAssuredSecrets.config())
+                .baseUri(todoApiUrl)
                 .contentType("application/json")
                 .body(Map.of("username", username, "password", password))
                 .when()
@@ -47,18 +52,35 @@ public class TodoApiSteps {
                 .then()
                 .extract()
                 .response();
+        Allure.step("Login an der Todo-API als '" + username + "' → Statuscode " + response.getStatusCode());
         assertions.setResponse(response);
         if (response.getStatusCode() == 200) {
             jwtToken = response.jsonPath().getString("token");
         }
     }
 
-    @Given("ich bin als {string} mit Passwort {string} in der Todo-API eingeloggt")
-    public void loginAndStoreToken(String username, String password) {
-        loginWithCredentials(username, password);
+    @When("ich mich an der Todo-API als Rolle {string} anmelde")
+    public void loginAsRole(String role) {
+        TestUsers.Credentials user = TestUsers.forRole("todo", role);
+        loginWithCredentials(user.username(), user.password());
+    }
+
+    @When("ich mich an der Todo-API als Rolle {string} mit falschem Passwort anmelde")
+    public void loginAsRoleWithWrongPassword(String role) {
+        loginWithCredentials(TestUsers.forRole("todo", role).username(), "falschesPasswort");
+    }
+
+    @Given("ich bin als Rolle {string} in der Todo-API eingeloggt")
+    public void loginAsRoleAndStoreToken(String role) {
+        loginAsRole(role);
         Assumptions.assumeTrue(jwtToken != null,
                 "Login fehlgeschlagen – Szenario wird übersprungen.");
         Allure.step("JWT-Token erhalten (Länge: " + jwtToken.length() + " Zeichen)");
+    }
+
+    @Then("enthält das JSON-Feld {string} den Benutzernamen der Rolle {string}")
+    public void verifyJsonFieldIsRoleUsername(String field, String role) {
+        assertions.verifyJsonFieldEqualsString(field, TestUsers.forRole("todo", role).username());
     }
 
     @Given("ich ein neues Todo mit Titel {string} angelegt habe")

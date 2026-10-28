@@ -6,6 +6,7 @@ import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.zephyr.ZephyrScaleService;
+import org.example.utils.ConfigReader;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -494,12 +495,110 @@ class TestExecutionServiceTest {
                 "Duration must be in mm:ss format but was: " + duration);
     }
 
-    // --- maxConcurrentRuns clamping (System-Property-Mutation ist nur bei 1 gleichzeitigen Run sicher) ---
+    // --- maxConcurrentRuns clamping (In-Process ist System-Property-Mutation nur bei 1 Run sicher) ---
 
     private TestExecutionService newService(int maxConcurrentRuns, int maxQueueSize) {
         return new TestExecutionService(
                 cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
                 new RunStatusRegistry(24, 500), new AllureReportService(), maxConcurrentRuns, maxQueueSize);
+    }
+
+    private TestExecutionService newSubprocessService(int maxConcurrentRuns, int maxBrowserRuns, int maxQueueSize) {
+        return new TestExecutionService(
+                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
+                new RunStatusRegistry(24, 500), new AllureReportService(), maxConcurrentRuns, maxQueueSize,
+                "subprocess", maxBrowserRuns, "@GUI");
+    }
+
+    @Test
+    void constructor_InProcessBrowserRunsAboveOne_ClampedToOne() {
+        TestExecutionService svc = new TestExecutionService(
+                cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
+                new RunStatusRegistry(24, 500), new AllureReportService(), 5, 20, "in-process", 2, "@GUI");
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> stats = (Map<String, Object>) svc.getStatistics(null);
+            assertEquals(1, stats.get("maxConcurrentRuns"));
+            assertEquals(1, stats.get("maxConcurrentBrowserRuns"));
+        } finally {
+            svc.shutdown();
+        }
+    }
+
+    @Test
+    void constructor_Subprocess_KeepsConfiguredPoolSizes() {
+        TestExecutionService svc = newSubprocessService(5, 2, 20);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> stats = (Map<String, Object>) svc.getStatistics(null);
+            assertEquals(5, stats.get("maxConcurrentRuns"));
+            assertEquals(2, stats.get("maxConcurrentBrowserRuns"));
+        } finally {
+            svc.shutdown();
+        }
+    }
+
+    @Test
+    void queueTestExecution_Subprocess_BrowserPoolFullDoesNotBlockApiRuns() throws Exception {
+        // Browser-Pool: 1 laufend + Queue 1 = Kapazität 2. API-Runs nutzen den eigenen Pool.
+        TestExecutionService svc = newSubprocessService(1, 1, 1);
+        CountDownLatch block = new CountDownLatch(1);
+        try {
+            when(cucumberRunnerService.run(anyString(), anyString(), any(), anyMap()))
+                    .thenAnswer(inv -> {
+                        block.await(10, TimeUnit.SECONDS);
+                        return new CucumberRunnerService.RunResult("id", "@GUI", 0, "out");
+                    });
+
+            TestExecutionRequest gui = createRequest("dev", List.of("@GUI"));
+            svc.queueTestExecution(gui);
+            await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
+                    assertTrue(svc.getActiveTests().stream().anyMatch(s -> RunState.RUNNING == s.getStatus())));
+            svc.queueTestExecution(gui);
+            assertThrows(CapacityExceededException.class, () -> svc.queueTestExecution(gui));
+
+            TestExecutionResponse api = svc.queueTestExecution(createRequest("dev", List.of("@API-Test")));
+            assertEquals(RunState.QUEUED, api.getStatus());
+        } finally {
+            block.countDown();
+            svc.shutdown();
+        }
+    }
+
+    @Test
+    void queueTestExecution_Subprocess_RunPropertiesOnlyPassedToRunner() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seenProperty = new java.util.concurrent.atomic.AtomicReference<>("unset");
+        java.util.concurrent.atomic.AtomicReference<Map<String, String>> passed = new java.util.concurrent.atomic.AtomicReference<>();
+        TestExecutionService svc = newSubprocessService(1, 1, 5);
+        try {
+            when(cucumberRunnerService.run(anyString(), any(), any(), anyMap())).thenAnswer(inv -> {
+                seenProperty.set(String.valueOf(System.getProperty("serviceUrl")));
+                passed.set(inv.getArgument(3));
+                return new CucumberRunnerService.RunResult(inv.getArgument(0), "@smoke", 0, "/tmp");
+            });
+            TestExecutionRequest request = createRequest("staging", List.of("@API-Test"));
+            request.setEnvironmentVariables(Map.of("serviceUrl", "https://service.example"));
+
+            UUID runId = svc.queueTestExecution(request).getRunId();
+            await().atMost(Duration.ofSeconds(5)).until(() ->
+                    svc.getTestStatus(runId).map(s -> s.getStatus() == RunState.COMPLETED).orElse(false));
+
+            assertEquals("null", seenProperty.get(), "Subprozess-Modus darf Server-Properties nicht mutieren");
+            assertEquals("https://service.example", passed.get().get("serviceUrl"));
+            assertEquals("staging", passed.get().get(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY));
+        } finally {
+            svc.shutdown();
+        }
+    }
+
+    @Test
+    void runProperties_ContainsEnvironment_RequestFieldWinsOverOverride() {
+        TestExecutionRequest request = createRequest("staging", List.of("@smoke"));
+        request.setEnvironmentVariables(Map.of(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "prod"));
+
+        Map<String, String> props = TestExecutionService.runProperties(request);
+
+        assertEquals("staging", props.get(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY));
     }
 
     @Test

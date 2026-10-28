@@ -11,6 +11,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.example.config.KnownEnvironment;
 
 import java.util.List;
 import java.util.Map;
@@ -44,10 +45,14 @@ public class TestExecutionRequest {
     /** Zephyr-Testrun-Key, z.B. {@code PROJ-R1} oder {@code PROJ-C15}; schließt Pfad-Injection aus. */
     static final String TEST_RUN_KEY_PATTERN = "^[A-Z][A-Z0-9_]{1,9}-[A-Z]?\\d+$";
 
+    /** Umgebungsname; fließt in System-Properties, {@code -D}-Argumente und Config-Keys. */
+    static final String ENVIRONMENT_PATTERN = "^[\\w-]{1,30}$";
+
     @NotBlank(message = "Environment darf nicht leer sein")
-    @Pattern(regexp = "dev|staging|prod|performance",
-            message = "Environment muss dev, staging, prod oder performance sein")
-    @Schema(description = "Ziel-Umgebung fuer die Tests",
+    @Pattern(regexp = ENVIRONMENT_PATTERN, message = "Environment darf nur Buchstaben, Ziffern, '_' und '-' enthalten")
+    @KnownEnvironment
+    @Schema(description = "Ziel-Umgebung fuer die Tests (erlaubte Namen per test.environments konfigurierbar, "
+            + "Default dev, staging, prod, performance)",
             example = "dev",
             requiredMode = Schema.RequiredMode.REQUIRED)
     private String environment;

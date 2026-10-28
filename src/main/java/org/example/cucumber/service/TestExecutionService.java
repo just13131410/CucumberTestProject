@@ -7,6 +7,7 @@ import org.example.cucumber.model.RunState;
 import org.example.cucumber.model.TestExecutionResponse;
 import org.example.cucumber.model.TestStatus;
 import org.example.integration.zephyr.ZephyrScaleService;
+import org.example.utils.ConfigReader;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,14 +49,21 @@ import java.util.stream.Stream;
 public class TestExecutionService {
 
     /**
-     * Max. gleichzeitig laufende Runs. Default 1: In-Process-Ausführung teilt eine JVM; >1
-     * gleichzeitige Runs sprengen auf kleinen Pods den Native-Speicher (OOMKill) UND korrumpieren
-     * sich über den prozessweiten Allure-Singleton gegenseitig. >1 ist erst mit Out-of-Process-
-     * Isolation (Subprozess) daten-korrekt. Über {@code test.execution.max-concurrent-runs} steuerbar.
+     * Max. gleichzeitig laufende Runs ohne Browser. In-Process immer 1: die Runs teilen eine JVM;
+     * >1 gleichzeitige Runs sprengen auf kleinen Pods den Native-Speicher (OOMKill) UND korrumpieren
+     * sich über den prozessweiten Allure-Singleton gegenseitig. Erst mit Out-of-Process-Isolation
+     * ({@code test.execution.mode=subprocess}) wirkt {@code test.execution.max-concurrent-runs}.
      */
     private final int maxConcurrentRuns;
+    /**
+     * Max. gleichzeitig laufende Runs mit Browser ({@link BrowserDemand}), eigener Pool neben
+     * {@link #maxConcurrentRuns}. Nur im Subprozess-Modus, {@code test.execution.max-concurrent-browser-runs}.
+     */
+    private final int maxConcurrentBrowserRuns;
     /** Begrenzte Warteschlange für echte Backpressure. {@code test.execution.max-queue-size}. */
     private final int maxQueueSize;
+    /** Subprozess-Modus: jeder Run in eigener JVM, Run-Properties nur als {@code -D} an die Kind-JVM. */
+    private final boolean isolated;
 
     /** Blockiert die Menge der verbotenen System-Property-Präfixe aus Request-Env-Variablen. */
     private static final List<String> BLOCKED_PROP_PREFIXES =
@@ -73,7 +81,10 @@ public class TestExecutionService {
     private final RunPersistenceService persistence;
     private final RunStatusRegistry statusRegistry;
     private final AllureReportService allureReportService;
+    private final BrowserDemand browserDemand;
     private final ThreadPoolExecutor executor;
+    /** In-Process identisch mit {@link #executor} (alles seriell), sonst eigener Pool. */
+    private final ThreadPoolExecutor browserExecutor;
     private final Map<UUID, Future<?>> runningFutures = new ConcurrentHashMap<>();
 
     /** Spring-Konstruktor: Concurrency und Queue-Größe über Properties konfigurierbar. */
@@ -84,33 +95,44 @@ public class TestExecutionService {
                                 RunStatusRegistry statusRegistry,
                                 AllureReportService allureReportService,
                                 @Value("${test.execution.max-concurrent-runs:1}") int maxConcurrentRuns,
-                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize) {
+                                @Value("${test.execution.max-queue-size:20}") int maxQueueSize,
+                                @Value("${test.execution.mode:in-process}") String executionMode,
+                                @Value("${test.execution.max-concurrent-browser-runs:2}") int maxConcurrentBrowserRuns,
+                                @Value("${test.execution.browser-tags:@GUI}") String browserTags) {
         this.cucumberRunnerService = cucumberRunnerService;
         this.zephyrScaleService = zephyrScaleService;
         this.persistence = persistence;
         this.statusRegistry = statusRegistry;
         this.allureReportService = allureReportService;
-        if (maxConcurrentRuns > 1) {
-            log.error("test.execution.max-concurrent-runs={} ignoriert und auf 1 geklemmt: "
-                    + "applyRunProperties()/restoreRunProperties() mutieren prozessweite System-Properties "
-                    + "(Browser/Headless/Env-Variablen) - bei >1 gleichzeitigen In-Process-Runs wuerden sich "
-                    + "diese Properties gegenseitig ueberschreiben. Erst mit Out-of-Process-Isolation "
-                    + "(Subprozess) ist >1 daten-korrekt.", maxConcurrentRuns);
-            maxConcurrentRuns = 1;
+        this.browserDemand = new BrowserDemand(browserTags);
+        this.isolated = "subprocess".equalsIgnoreCase(executionMode);
+        if (!isolated && (maxConcurrentRuns > 1 || maxConcurrentBrowserRuns > 1)) {
+            log.error("test.execution.max-concurrent-runs={} / max-concurrent-browser-runs={} ignoriert und "
+                    + "auf 1 geklemmt: applyRunProperties()/restoreRunProperties() mutieren prozessweite "
+                    + "System-Properties (Browser/Headless/Env-Variablen/Umgebung) - bei >1 gleichzeitigen "
+                    + "In-Process-Runs wuerden sich diese Properties gegenseitig ueberschreiben. Erst mit "
+                    + "test.execution.mode=subprocess ist >1 daten-korrekt.",
+                    maxConcurrentRuns, maxConcurrentBrowserRuns);
         }
-        this.maxConcurrentRuns = Math.max(1, maxConcurrentRuns);
+        this.maxConcurrentRuns = isolated ? Math.max(1, maxConcurrentRuns) : 1;
+        this.maxConcurrentBrowserRuns = isolated ? Math.max(1, maxConcurrentBrowserRuns) : 1;
         this.maxQueueSize = Math.max(1, maxQueueSize);
-        // Begrenzte Queue → submit() wirft RejectedExecutionException bei Überlast → echtes 429.
-        this.executor = new ThreadPoolExecutor(
-                this.maxConcurrentRuns, this.maxConcurrentRuns,
-                0L, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(this.maxQueueSize),
-                r -> {
-                    Thread t = new Thread(r);
-                    t.setName("test-executor-" + t.getId());
-                    t.setDaemon(true);
-                    return t;
-                });
+        this.executor = newPool(this.maxConcurrentRuns, "test-executor-");
+        this.browserExecutor = isolated ? newPool(this.maxConcurrentBrowserRuns, "test-executor-browser-") : executor;
+        log.info("Ausführung: mode={}, max-concurrent-runs={}, max-concurrent-browser-runs={}",
+                isolated ? "subprocess" : "in-process", this.maxConcurrentRuns, this.maxConcurrentBrowserRuns);
+    }
+
+    /** In-Process-Konstruktor (Unit-Tests): Pool-Größe wird auf 1 geklemmt. */
+    public TestExecutionService(CucumberRunnerService cucumberRunnerService,
+                                ZephyrScaleService zephyrScaleService,
+                                RunPersistenceService persistence,
+                                RunStatusRegistry statusRegistry,
+                                AllureReportService allureReportService,
+                                int maxConcurrentRuns,
+                                int maxQueueSize) {
+        this(cucumberRunnerService, zephyrScaleService, persistence, statusRegistry, allureReportService,
+                maxConcurrentRuns, maxQueueSize, "in-process", 1, "@GUI");
     }
 
     /** Backward-compatible Konstruktor (Unit-Tests): Defaults, N=1. */
@@ -118,6 +140,20 @@ public class TestExecutionService {
                                 ZephyrScaleService zephyrScaleService) {
         this(cucumberRunnerService, zephyrScaleService, new RunPersistenceService(),
                 new RunStatusRegistry(24, 500), new AllureReportService(), 1, 20);
+    }
+
+    /** Begrenzte Queue → submit() wirft RejectedExecutionException bei Überlast → echtes 429. */
+    private ThreadPoolExecutor newPool(int size, String threadPrefix) {
+        return new ThreadPoolExecutor(
+                size, size,
+                0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(maxQueueSize),
+                r -> {
+                    Thread t = new Thread(r);
+                    t.setName(threadPrefix + t.getId());
+                    t.setDaemon(true);
+                    return t;
+                });
     }
 
     public TestExecutionResponse queueTestExecution(TestExecutionRequest request) {
@@ -139,22 +175,27 @@ public class TestExecutionService {
                 .build();
         statusRegistry.put(runId, status);
 
+        // Browser-Läufe in eigenen, kleineren Pool (nur im Subprozess-Modus getrennt).
+        boolean browserRun = isolated && browserDemand.needsBrowser(request.getTags(), request.getFeatures());
+        ThreadPoolExecutor pool = browserRun ? browserExecutor : executor;
+        int poolSize = browserRun ? maxConcurrentBrowserRuns : maxConcurrentRuns;
+
         // Admission Control: bei erschöpfter Kapazität (laufend + begrenzte Queue) sofort ablehnen.
         Future<?> future;
         try {
-            future = executor.submit(() -> executeTest(runId, tagsExpression, features, request));
+            future = pool.submit(() -> executeTest(runId, tagsExpression, features, request));
         } catch (RejectedExecutionException e) {
             statusRegistry.remove(runId);
-            int capacity = maxConcurrentRuns + maxQueueSize;
-            log.warn("Kapazität erschöpft, Run abgelehnt (max-concurrent={}, max-queue={})",
-                    maxConcurrentRuns, maxQueueSize);
+            int capacity = poolSize + maxQueueSize;
+            log.warn("Kapazität erschöpft, Run abgelehnt (browser={}, max-concurrent={}, max-queue={})",
+                    browserRun, poolSize, maxQueueSize);
             throw new CapacityExceededException(
                     "Zu viele gleichzeitige/wartende Test-Läufe (Kapazität " + capacity + ")");
         }
         runningFutures.put(runId, future);
 
-        log.info("Test execution queued: runId={}, tags={}, environment={}",
-                runId, tagsExpression, request.getEnvironment());
+        log.info("Test execution queued: runId={}, tags={}, environment={}, browser={}",
+                runId, tagsExpression, request.getEnvironment(), browserRun);
 
         return TestExecutionResponse.builder()
                 .runId(runId)
@@ -178,10 +219,11 @@ public class TestExecutionService {
             running.setStartTime(LocalDateTime.now());
             running.setCurrentPhase("EXECUTING");
 
-            // Run-spezifische System-Properties setzen; vorherige Werte für sauberes Restore merken.
-            // Dieselben Werte gehen im Subprozess-Modus explizit als -D an die Kind-JVM.
+            // In-Process: run-spezifische System-Properties setzen, vorherige Werte für sauberes Restore
+            // merken. Im Subprozess-Modus gehen sie nur als -D an die Kind-JVM - parallele Runs dürfen
+            // die prozessweiten Properties des Servers nicht gegenseitig überschreiben.
             Map<String, String> runProperties = runProperties(request);
-            Map<String, String> previousProps = applyRunProperties(runProperties);
+            Map<String, String> previousProps = isolated ? Map.of() : applyRunProperties(runProperties);
 
             // Count expected scenarios for progress tracking (best-effort, tag-unaware)
             int totalScenarios = scenarioCount();
@@ -287,7 +329,7 @@ public class TestExecutionService {
 
     /**
      * Run-spezifische Properties eines Requests: gefilterte Env-Variablen ({@link #filterOverrides})
-     * plus Browser und Headless.
+     * plus Browser, Headless und Ziel-Umgebung ({@link ConfigReader#ACTIVE_ENVIRONMENT_PROPERTY}).
      */
     static Map<String, String> runProperties(TestExecutionRequest request) {
         Map<String, String> toSet = filterOverrides(request.getEnvironmentVariables());
@@ -296,6 +338,9 @@ public class TestExecutionService {
         }
         if (request.getHeadless() != null) {
             toSet.put("browser.headless", request.getHeadless().toString());
+        }
+        if (request.getEnvironment() != null) {
+            toSet.put(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, request.getEnvironment());
         }
         return toSet;
     }
@@ -443,6 +488,7 @@ public class TestExecutionService {
     public Object getStatistics(String environment) {
         Map<String, Object> stats = statusRegistry.getStatistics(environment);
         stats.put("maxConcurrentRuns", maxConcurrentRuns);
+        stats.put("maxConcurrentBrowserRuns", maxConcurrentBrowserRuns);
         stats.put("maxQueueSize", maxQueueSize);
         return stats;
     }
@@ -499,6 +545,7 @@ public class TestExecutionService {
     @PreDestroy
     public void shutdown() {
         executor.shutdownNow();
+        browserExecutor.shutdownNow();
         allureReportService.shutdown();
     }
 }

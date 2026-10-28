@@ -101,10 +101,21 @@ public class ConfigReader {
      * Leere bzw. nur aus Whitespace bestehende Werte gelten als nicht gesetzt, es greift die nächste
      * Quelle. Sonst würde z.B. ein leer angelegtes {@code ZEPHYR_BASE_URL} aus ConfigMap/Secret den
      * Default überdecken und erst beim ersten HTTP-Call als {@code URI is not absolute} auffallen.
+     * <p>
+     * Ist eine Ziel-Umgebung aktiv ({@value #ACTIVE_ENVIRONMENT_PROPERTY}), wird zuerst
+     * {@code env.<umgebung>.<key>} über dieselbe Kette gesucht (Env-Variable z.B.
+     * {@code ENV_TEST_BASEURL}), erst danach der globale Key.
      */
     public static String get(String key, String defaultValue) {
         return getWithSource(key, defaultValue).value();
     }
+
+    /**
+     * System-Property mit der Ziel-Umgebung des laufenden Testlaufs. Wird bewusst nur als
+     * System-Property gelesen (pro Lauf gesetzt bzw. als {@code -D} an die Kind-JVM), nie aus einer
+     * Env-Variable - sonst könnte eine Pod-weite Variable alle Läufe auf eine Umgebung zwingen.
+     */
+    public static final String ACTIVE_ENVIRONMENT_PROPERTY = "test.environment";
 
     /** Aufgelöster Konfigurationswert plus menschenlesbare Angabe, aus welcher Quelle er stammt. */
     public record ResolvedValue(String value, String source) {}
@@ -114,6 +125,32 @@ public class ConfigReader {
      * Diagnose-/Startup-Logs (z.B. "welche Zephyr-URL/Credentials werden tatsächlich verwendet").
      */
     public static ResolvedValue getWithSource(String key, String defaultValue) {
+        String scopedKey = environmentScopedKey(key);
+        if (scopedKey != null) {
+            ResolvedValue scoped = lookup(scopedKey);
+            if (scoped != null) {
+                return scoped;
+            }
+        }
+        ResolvedValue global = lookup(key);
+        if (global != null) {
+            return global;
+        }
+        log.debug("Key '{}' nicht gefunden – verwende Default: '{}'", key, defaultValue);
+        return new ResolvedValue(defaultValue, "Default");
+    }
+
+    /**
+     * Umgebungsspezifischer Key {@code env.<umgebung>.<key>} oder {@code null}, wenn keine
+     * Umgebung aktiv ist. Package-private für Unit-Tests.
+     */
+    static String environmentScopedKey(String key) {
+        String environment = System.getProperty(ACTIVE_ENVIRONMENT_PROPERTY);
+        return isSet(environment) ? "env." + environment.strip() + "." + key : null;
+    }
+
+    /** Durchläuft die Quellen-Kette für genau einen Key; {@code null}, wenn keine Quelle ihn setzt. */
+    private static ResolvedValue lookup(String key) {
         String envKey = toEnvKey(key);
 
         String envValue = System.getenv(envKey);
@@ -145,9 +182,7 @@ public class ConfigReader {
             log.debug("Key '{}' bezogen aus: config.properties (Classpath)", key);
             return new ResolvedValue(trim(propValue), "config.properties (Classpath)");
         }
-
-        log.debug("Key '{}' nicht gefunden – verwende Default: '{}'", key, defaultValue);
-        return new ResolvedValue(defaultValue, "Default");
+        return null;
     }
 
     private static boolean isSet(String value) {

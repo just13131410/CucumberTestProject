@@ -46,13 +46,15 @@ spec:
           envFrom:
             - configMapRef:
                 name: cucumber-test-config
+          # Subprozess-Modus (ConfigMap): Server-JVM + bis zu 7 Kind-JVMs, davon 2 mit lokalem
+          # Chromium. Startwert, per Lasttest nachjustieren.
           resources:
             requests:
-              memory: "2Gi"
+              memory: "3Gi"
               cpu: "1"
             limits:
-              memory: "4Gi"
-              cpu: "2"
+              memory: "8Gi"
+              cpu: "4"
           # Liveness: is the container alive?
           livenessProbe:
             httpGet:

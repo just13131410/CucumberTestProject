@@ -9,6 +9,15 @@ data:
   SPRING_PROFILES_ACTIVE: "prod"
   TEST_RESULTS_PATH: "/app/test-results"
   CUCUMBER_PARALLEL_THREADS: "4"
+  # ---- Parallele Läufe: je Run eine eigene JVM ----
+  # Getrennte Pools: max. 2 Runs mit Browser (@GUI) + max. 5 Runs ohne Browser.
+  TEST_EXECUTION_MODE: "subprocess"
+  TEST_EXECUTION_MAX_CONCURRENT_RUNS: "5"
+  TEST_EXECUTION_MAX_CONCURRENT_BROWSER_RUNS: "2"
+  TEST_EXECUTION_SUBPROCESS_JVM_ARGS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=96m -XX:MaxDirectMemorySize=64m"
+  # ---- Ziel-Umgebungen (Request-Feld "environment") ----
+  # Erlaubte Namen; umgebungsspezifische Werte als ENV_<UMGEBUNG>_<KEY>, z.B. ENV_STAGING_BASEURL.
+  TEST_ENVIRONMENTS: "dev,staging,prod,performance"
   # ---- Playwright Browser-Download über den internen Mirror ----
   PLAYWRIGHT_MIRROR_ENABLED: "true"
   # Mirror-Service. Cross-Namespace-DNS, falls der Mirror in eigenem Namespace läuft:

@@ -80,6 +80,28 @@ class TestExecutionRequestTest {
     }
 
     @Test
+    void configuredEnvironments_AreAcceptedWithoutCodeChange() {
+        System.setProperty("test.environments", "dev,feature-x");
+        try {
+            assertTrue(validator.validate(valid().environment("feature-x").build()).isEmpty());
+            assertTrue(violates(valid().environment("staging").build(), "environment"));
+        } finally {
+            System.clearProperty("test.environments");
+        }
+    }
+
+    @Test
+    void environmentWithSpecialCharacters_ViolatesPattern() {
+        System.setProperty("test.environments", "dev,a b");
+        try {
+            assertTrue(violates(valid().environment("a b").build(), "environment"));
+            assertTrue(violates(valid().environment("dev -Dx=1").build(), "environment"));
+        } finally {
+            System.clearProperty("test.environments");
+        }
+    }
+
+    @Test
     void emptyTags_ViolatesNotEmpty() {
         TestExecutionRequest request = TestExecutionRequest.builder()
                 .environment("dev")

@@ -13,6 +13,7 @@ import org.example.config.PlaywrightBrowserInstaller;
 import org.example.hooks.AxeReportHook;
 import org.example.pages.BasePage;
 import org.example.utils.ConfigReader;
+import org.example.utils.TestUsers;
 
 import java.util.regex.Pattern;
 
@@ -32,7 +33,8 @@ public class DashboardSteps extends BasePage {
         this.browserInstaller = browserInstaller;
     }
 
-    @Before
+    /** Browser nur für GUI-Szenarien; muss zu {@code test.execution.browser-tags} passen. */
+    @Before("@GUI")
     public void setUp(Scenario scenario) {
         this.currentScenario = scenario;
         String browserName = System.getProperty("browser");
@@ -40,7 +42,7 @@ public class DashboardSteps extends BasePage {
         page = createPlaywrightPageInstance(browserName);
     }
 
-    @After
+    @After("@GUI")
     public void tearDown(Scenario scenario) {
         if (page != null && !page.isClosed()) {
             String label = scenario.isFailed()
@@ -71,6 +73,12 @@ public class DashboardSteps extends BasePage {
         page.click("button[type=\"submit\"]");
     }
 
+    @Wenn("ich mich als Rolle {string} einlogge")
+    public void ich_mich_als_rolle_einlogge(String rolle) {
+        TestUsers.Credentials user = TestUsers.forRole("gui", rolle);
+        ich_mich_mit_benutzername_und_passwort_einlogge(user.username(), user.password());
+    }
+
     @Dann("sollte ich das Dashboard sehen")
     public void sollte_ich_das_dashboard_sehen() {
         assertThat(page).hasURL(Pattern.compile(".*dashboard"));
@@ -89,9 +97,10 @@ public class DashboardSteps extends BasePage {
 
     @Gegebensei("ich bin auf dem Dashboard eingeloggt")
     public void ich_bin_auf_dem_dashboard_eingeloggt() {
+        TestUsers.Credentials admin = TestUsers.forRole("gui", "admin");
         page.navigate(baseUrl + "login");
-        page.fill("input[name=\"username\"]", "admin");
-        page.fill("input[name=\"password\"]", "admin");
+        page.fill("input[name=\"username\"]", admin.username());
+        page.fill("input[name=\"password\"]", admin.password());
         page.click("button[type=\"submit\"]");
         assertThat(page).hasURL(Pattern.compile(".*dashboard"));
         page.waitForSelector("table");

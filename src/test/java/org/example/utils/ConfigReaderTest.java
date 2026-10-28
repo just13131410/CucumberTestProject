@@ -18,6 +18,72 @@ class ConfigReaderTest {
         System.clearProperty("testKey");
         System.clearProperty("baseUrl");
         System.clearProperty("app.test.key");
+        System.clearProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY);
+        System.clearProperty("scoped.test.key");
+        System.clearProperty("env.staging.scoped.test.key");
+    }
+
+    // --- Umgebungsspezifische Keys (env.<umgebung>.<key>) ---
+
+    @Test
+    void get_ActiveEnvironment_ScopedKeyWinsOverGlobalKey() {
+        System.setProperty("scoped.test.key", "global");
+        System.setProperty("env.staging.scoped.test.key", "staging");
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "staging");
+
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("scoped.test.key", "default");
+
+        assertEquals("staging", result.value());
+        assertTrue(result.source().contains("env.staging.scoped.test.key"), result.source());
+    }
+
+    @Test
+    void get_ActiveEnvironmentWithoutScopedKey_FallsBackToGlobalKey() {
+        System.setProperty("scoped.test.key", "global");
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "staging");
+
+        assertEquals("global", ConfigReader.get("scoped.test.key", "default"));
+    }
+
+    @Test
+    void get_ActiveEnvironmentWithoutAnyKey_ReturnsDefault() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "staging");
+
+        assertEquals("default", ConfigReader.get("scoped.test.key", "default"));
+    }
+
+    @Test
+    void get_NoActiveEnvironment_IgnoresScopedKey() {
+        System.setProperty("scoped.test.key", "global");
+        System.setProperty("env.staging.scoped.test.key", "staging");
+
+        assertEquals("global", ConfigReader.get("scoped.test.key", "default"));
+    }
+
+    @Test
+    void get_OtherActiveEnvironment_IgnoresScopedKeyOfStaging() {
+        System.setProperty("scoped.test.key", "global");
+        System.setProperty("env.staging.scoped.test.key", "staging");
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "prod");
+
+        assertEquals("global", ConfigReader.get("scoped.test.key", "default"));
+    }
+
+    @Test
+    void environmentScopedKey_BlankEnvironment_ReturnsNull() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "  ");
+
+        assertNull(ConfigReader.environmentScopedKey("baseUrl"));
+    }
+
+    @Test
+    void environmentScopedKey_StripsEnvironmentAndMapsToEnvVarName() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, " feature-x ");
+
+        String scoped = ConfigReader.environmentScopedKey("baseUrl");
+
+        assertEquals("env.feature-x.baseUrl", scoped);
+        assertEquals("ENV_FEATURE_X_BASEURL", ConfigReader.toEnvKey(scoped));
     }
 
     @Test

@@ -4,8 +4,9 @@
 # Browser: Playwright-Server als Sidecar (k8s/playwright-server/Dockerfile), Verbindung per
 # PLAYWRIGHT_MODE=remote + PLAYWRIGHT_REMOTE_ENDPOINT=ws://localhost:3000/.
 #
-# Phase 0 (docs/lasttest-analyse-und-umsetzungsplan.md): native Speicher-Caps + Guaranteed QoS +
-# entkoppelte Probes, damit ein Testlauf den Pod nicht mehr über das 2-Gi-Limit OOMKillt.
+# Phase 0 (docs/lasttest-analyse-und-umsetzungsplan.md): native Speicher-Caps + entkoppelte Probes,
+# damit ein Testlauf den Pod nicht OOMKillt. Seit dem Subprozess-Modus (parallele Läufe) Burstable
+# QoS mit höherem Limit, siehe resources.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -69,6 +70,28 @@ spec:
             # Todo-API-Fixture für die @API-Test-Szenarien (Service im selben Namespace).
             - name: TODOAPIURL
               value: "http://allure-todo-api:3000"
+            # ---- Zugangsdaten der Test-Fixtures (lokaler Cluster, keine echten Secrets) ----
+            # Schema <system>.user.<rolle>.*; je Umgebung z.B. ENV_STAGING_TODO_USER_ADMIN_PASSWORD.
+            - name: TODO_USER_ADMIN_USERNAME
+              value: "admin"
+            - name: TODO_USER_ADMIN_PASSWORD
+              value: "password123"
+            - name: GUI_USER_ADMIN_USERNAME
+              value: "admin"
+            - name: GUI_USER_ADMIN_PASSWORD
+              value: "admin"
+            # ---- Parallele Läufe: je Run eine eigene JVM (Kind-Prozess) ----
+            # Getrennte Pools: max. 2 Runs mit Browser (@GUI) + max. 5 Runs ohne Browser.
+            - name: TEST_EXECUTION_MODE
+              value: "subprocess"
+            - name: TEST_EXECUTION_MAX_CONCURRENT_RUNS
+              value: "5"
+            - name: TEST_EXECUTION_MAX_CONCURRENT_BROWSER_RUNS
+              value: "2"
+            # Kind-JVMs erben JAVA_TOOL_OPTIONS (s.u.); diese Flags stehen auf der Kommandozeile und
+            # haben Vorrang. Obergrenze je Kind ≈ 890 Mi, real gemessen deutlich darunter (s. resources).
+            - name: TEST_EXECUTION_SUBPROCESS_JVM_ARGS
+              value: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=96m -XX:MaxDirectMemorySize=64m"
             # ---- Browser läuft im Playwright-Sidecar (s.u.), nicht in diesem Container ----
             # playwright.mode=remote: kein Browser-Download/-Start in diesem Container.
             # (mode=local würde den Browser hier starten – Mirror bzw. browser.executable.path.)
@@ -117,13 +140,16 @@ spec:
             # /app/test-results (das wird per /reports/** ausgeliefert). Abholen: kubectl cp.
             - name: dumps
               mountPath: /dumps
+          # Subprozess-Modus: Server-JVM + bis zu 7 Kind-JVMs. Gemessen 28.10.2026 (2 GUI + 5 API
+          # parallel, Browser im Sidecar): Spitze 2.948 MiB → 4 Gi Limit lässt ~1 Gi Reserve.
+          # Requests < Limits (Burstable) statt Guaranteed, damit der Pod auf Rancher Desktop plant.
           resources:
             requests:
-              memory: "2Gi"
+              memory: "3Gi"
               cpu: "1000m"
             limits:
-              memory: "2Gi"
-              cpu: "2"
+              memory: "4Gi"
+              cpu: "4"
           startupProbe:
             httpGet:
               path: /actuator/health/readiness

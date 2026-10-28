@@ -31,7 +31,7 @@ Der Cucumber Test Service stellt eine REST API bereit, über die Teams automatis
 
 **Basis-Pfad:** `/api/v1/test`
 **Content-Type:** `application/json`
-**Max. gleichzeitige Läufe:** 5
+**Max. gleichzeitige Läufe:** 5 ohne Browser + 2 mit Browser (Subprozess-Modus, siehe [Parallele Ausführung](#parallele-ausführung-mehrere-teams))
 
 ---
 
@@ -95,7 +95,7 @@ Content-Type: application/json
 
 | Feld                  | Typ              | Pflicht | Beschreibung                                           |
 |-----------------------|------------------|---------|--------------------------------------------------------|
-| `environment`         | String           | Ja      | Ziel-Umgebung: `dev`, `staging`, `prod`, `performance` |
+| `environment`         | String           | Ja      | Ziel-Umgebung, eine der konfigurierten Umgebungen (Standard: `dev`, `staging`, `prod`, `performance`; siehe [Ziel-Umgebungen](#ziel-umgebungen)). Unbekannte Namen → 400 |
 | `tags`                | Liste (Strings)  | Ja      | Einfache Cucumber-Tags (`@smoke`, `API-Test`), ODER-verknüpft, max. 20. Tag-Ausdrücke wie `@a and not @b` werden mit 400 abgelehnt |
 | `features`            | Liste (Strings)  | Nein    | Feature-Dateien relativ zu `features/`, optional mit Zeilennummer: `GUIProjectTests.feature`, `API-Test.feature:12`. Keine absoluten Pfade, kein `..`, max. 50 |
 | `browser`             | String           | Nein    | Browser für UI-Tests: `chromium`, `chrome`, `firefox`, `webkit` |
@@ -166,9 +166,37 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   }'
 ```
 
-Die Ziel-URL der UI-Tests (`baseUrl`) wird pro Deployment gesetzt (Umgebungsvariable `BASEURL`).
+Die Ziel-URL der UI-Tests (`baseUrl`) wird pro Deployment gesetzt (Umgebungsvariable `BASEURL`)
+und je Ziel-Umgebung über `ENV_<UMGEBUNG>_BASEURL` (siehe [Ziel-Umgebungen](#ziel-umgebungen)).
 Pro Lauf lässt sie sich per `"environmentVariables": {"baseUrl": "https://meine-app.example.com/"}`
-überschreiben, sofern im Pod keine Umgebungsvariable `BASEURL` gesetzt ist (die hat Vorrang).
+überschreiben, sofern im Pod keine passende Umgebungsvariable gesetzt ist (die hat Vorrang).
+
+### Ziel-Umgebungen
+
+Ein Lauf gegen `"environment": "staging"` liest jeden Konfigurationswert zuerst
+umgebungsspezifisch als `env.staging.<key>` und erst danach global als `<key>`. Das gilt für alle
+Quellen (Umgebungsvariable, `.env`, Vault/Secret-Datei, `config.properties`):
+
+| Wert                       | global (z.B. `dev`)         | nur Umgebung `staging`                      |
+|----------------------------|-----------------------------|---------------------------------------------|
+| UI-Ziel (`baseUrl`)        | `BASEURL`                   | `ENV_STAGING_BASEURL`                       |
+| Todo-API (`todoApiUrl`)    | `TODOAPIURL`                | `ENV_STAGING_TODOAPIURL`                    |
+| GUI-Login Rolle `admin`    | `GUI_USER_ADMIN_USERNAME` / `GUI_USER_ADMIN_PASSWORD` | `ENV_STAGING_GUI_USER_ADMIN_USERNAME` / `ENV_STAGING_GUI_USER_ADMIN_PASSWORD` |
+| Todo-Login Rolle `admin`   | `TODO_USER_ADMIN_USERNAME` / `TODO_USER_ADMIN_PASSWORD` | `ENV_STAGING_TODO_USER_ADMIN_USERNAME` / `ENV_STAGING_TODO_USER_ADMIN_PASSWORD` |
+
+Fehlt ein umgebungsspezifischer Wert, gilt der globale. Zugangsdaten stehen nie in Feature-Dateien:
+Steps wie `ich mich als Rolle "admin" einlogge` lesen `<system>.user.<rolle>.username/password`.
+Fehlen sie, schlägt der Step mit dem Namen der erwarteten Variable fehl.
+
+**Umgebungen ändern (ohne Rebuild):**
+
+1. Erlaubte Namen setzen: `TEST_ENVIRONMENTS=dev,feature,test` (lokal in `.env`, auf OpenShift in der
+   ConfigMap `cucumber-test-config`) oder `test.environments=...` in `config.properties`.
+   Erlaubt sind Buchstaben, Ziffern, `_` und `-`; aus `feature-x` wird `ENV_FEATURE_X_...`.
+2. Abweichende Werte je Umgebung hinterlegen: URLs in ConfigMap/`config.properties`
+   (`ENV_FEATURE_BASEURL` bzw. `env.feature.baseUrl=...`), Zugangsdaten in `.env` bzw. Vault
+   (`ENV_FEATURE_GUI_USER_ADMIN_PASSWORD`).
+3. Pod neu starten (ConfigMap-Änderungen) und aufrufen: `{"environment": "feature", ...}`.
 
 **Response (202 Accepted):**
 ```json
@@ -187,8 +215,8 @@ Pro Lauf lässt sie sich per `"environmentVariables": {"baseUrl": "https://meine
 
 | Code | Bedeutung                                      |
 |------|-------------------------------------------------|
-| 400  | Ungültige Parameter (z.B. fehlende Tags, Tag-Ausdruck, ungültiger Feature-Pfad oder Zephyr-Key) |
-| 429  | Kapazität erschöpft: ein Lauf aktiv und Warteschlange voll |
+| 400  | Ungültige Parameter (z.B. fehlende Tags, Tag-Ausdruck, ungültiger Feature-Pfad oder Zephyr-Key, unbekannte Umgebung) |
+| 429  | Kapazität erschöpft: alle Slots des zuständigen Pools (mit/ohne Browser) belegt und dessen Warteschlange voll |
 | 500  | Interner Serverfehler                           |
 
 ---
@@ -469,7 +497,8 @@ curl http://localhost:8080/api/v1/test/statistics?environment=staging
   "runningRuns": 1,
   "queuedRuns": 1,
   "successRate": 83.33,
-  "maxConcurrentRuns": 5
+  "maxConcurrentRuns": 5,
+  "maxConcurrentBrowserRuns": 2
 }
 ```
 
@@ -641,7 +670,21 @@ curl -s -X POST http://localhost:8080/api/v1/test/report/combined/generate \
 
 ## Parallele Ausführung (mehrere Teams)
 
-Der Dienst unterstützt bis zu **5 gleichzeitige Test-Läufe**. Jeder Lauf erhält eine eigene Run-ID und isolierte Ergebnis-Verzeichnisse, sodass sich parallele Ausführungen nicht gegenseitig beeinflussen.
+Im Subprozess-Modus (`test.execution.mode=subprocess`, auf OpenShift/k8s gesetzt) läuft jeder Test-Lauf
+in einer eigenen JVM. Läufe gegen **unterschiedliche Ziel-Umgebungen** können daher gleichzeitig laufen,
+ohne sich Konfiguration oder Zugangsdaten zu teilen. Jeder Lauf erhält eine eigene Run-ID und isolierte
+Ergebnis-Verzeichnisse.
+
+Es gibt zwei getrennte Pools:
+
+| Pool          | Gilt für                                                        | Gleichzeitig | Property                                     |
+|---------------|-----------------------------------------------------------------|--------------|----------------------------------------------|
+| Mit Browser   | Läufe, die mindestens ein Szenario mit `@GUI` enthalten          | 2            | `test.execution.max-concurrent-browser-runs` |
+| Ohne Browser  | alle übrigen Läufe (z.B. nur `@API-Test`, `@Backend`)            | 5            | `test.execution.max-concurrent-runs`         |
+
+Welche Tags einen Browser bedeuten, steht in `test.execution.browser-tags` (Standard `@GUI`, auch vom
+Feature geerbt). Ein Lauf mit gemischten Szenarien zählt als Browser-Lauf. Im In-Process-Modus (lokaler
+Standard) laufen alle Läufe nacheinander.
 
 **Beispiel: Team A und Team B starten gleichzeitig Tests:**
 
@@ -663,7 +706,9 @@ curl -X POST http://localhost:8080/api/v1/test/execute \
   }'
 ```
 
-Falls alle 5 Slots belegt sind, werden weitere Anfragen in eine Warteschlange gestellt und automatisch ausgeführt, sobald ein Slot frei wird.
+Falls alle Slots eines Pools belegt sind, werden weitere Anfragen in dessen Warteschlange gestellt
+(max. 20 je Pool) und automatisch ausgeführt, sobald ein Slot frei wird. Ist auch die Warteschlange
+voll, antwortet der Dienst mit `429`. Volle Browser-Slots blockieren API-Läufe nicht.
 
 ---
 
@@ -706,10 +751,11 @@ Tag-Ausdrücke mit `and`, `not` oder Klammern werden abgelehnt (400).
 
 | Problem                                    | Lösung                                                        |
 |--------------------------------------------|----------------------------------------------------------------|
-| `400 Bad Request`                          | Request-Body prüfen: `environment` und `tags` sind Pflicht    |
+| `400 Bad Request`                          | Request-Body prüfen: `environment` und `tags` sind Pflicht; `environment` muss in `TEST_ENVIRONMENTS` stehen |
+| Step meldet „Zugangsdaten fehlen“          | Genannte Variable (z.B. `ENV_STAGING_GUI_USER_ADMIN_PASSWORD`) in `.env` bzw. Vault setzen |
 | `404 Not Found`                            | Run-ID prüfen - ist sie korrekt?                              |
 | `429 Too Many Requests`                    | Warten bis laufende Tests abgeschlossen sind                   |
-| Status bleibt auf `QUEUED`                 | Es läuft immer nur ein Lauf gleichzeitig, weitere warten (max. 20) - mit `GET /active` prüfen |
+| Status bleibt auf `QUEUED`                 | Alle Slots des Pools belegt (In-Process: nur ein Lauf gleichzeitig), weitere warten (max. 20 je Pool) - mit `GET /active` prüfen |
 | Report leer oder nicht vorhanden           | Test muss erst abgeschlossen sein (Status: COMPLETED/FAILED)   |
 | UI-Tests schlagen fehl                     | Browser prüfen (`chromium` ist Standard im Container)         |
 | Keine Screenshots im Allure-Report         | Screenshots werden nur bei UI-Tests (`@End2End`, `@smoke`) erstellt, nicht bei `@API-Test` |

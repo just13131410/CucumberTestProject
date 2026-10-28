@@ -87,6 +87,44 @@ class ConfigReaderTest {
     }
 
     @Test
+    void activeEnvironment_NotSet_ReturnsNull() {
+        assertNull(ConfigReader.activeEnvironment());
+    }
+
+    @Test
+    void activeEnvironment_Blank_ReturnsNull() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "  ");
+
+        assertNull(ConfigReader.activeEnvironment());
+    }
+
+    @Test
+    void activeEnvironment_ReturnsStrippedValue() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, " prod ");
+
+        assertEquals("prod", ConfigReader.activeEnvironment());
+    }
+
+    @Test
+    void isActiveEnvironment_MatchesAnyListedEnvironmentIgnoringCase() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "Staging");
+
+        assertTrue(ConfigReader.isActiveEnvironment("prod", "staging"));
+    }
+
+    @Test
+    void isActiveEnvironment_OtherEnvironment_ReturnsFalse() {
+        System.setProperty(ConfigReader.ACTIVE_ENVIRONMENT_PROPERTY, "dev");
+
+        assertFalse(ConfigReader.isActiveEnvironment("prod", "staging"));
+    }
+
+    @Test
+    void isActiveEnvironment_NoActiveEnvironment_ReturnsFalse() {
+        assertFalse(ConfigReader.isActiveEnvironment("prod"));
+    }
+
+    @Test
     void get_ReturnsDefaultValue_WhenKeyNotFound() {
         String result = ConfigReader.get("nonExistentKey", "defaultValue");
 

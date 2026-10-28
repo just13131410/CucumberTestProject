@@ -145,8 +145,23 @@ public class ConfigReader {
      * Umgebung aktiv ist. Package-private für Unit-Tests.
      */
     static String environmentScopedKey(String key) {
+        String environment = activeEnvironment();
+        return environment != null ? "env." + environment + "." + key : null;
+    }
+
+    /**
+     * Ziel-Umgebung des laufenden Testlaufs ({@value #ACTIVE_ENVIRONMENT_PROPERTY}) oder
+     * {@code null}, wenn keine gesetzt ist (z.B. Maven-Lauf ohne Request).
+     */
+    public static String activeEnvironment() {
         String environment = System.getProperty(ACTIVE_ENVIRONMENT_PROPERTY);
-        return isSet(environment) ? "env." + environment.strip() + "." + key : null;
+        return isSet(environment) ? environment.strip() : null;
+    }
+
+    /** {@code true}, wenn der Lauf gegen eine der genannten Umgebungen geht (Groß-/Kleinschreibung egal). */
+    public static boolean isActiveEnvironment(String... environments) {
+        String active = activeEnvironment();
+        return active != null && Arrays.stream(environments).anyMatch(active::equalsIgnoreCase);
     }
 
     /** Durchläuft die Quellen-Kette für genau einen Key; {@code null}, wenn keine Quelle ihn setzt. */

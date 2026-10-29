@@ -60,8 +60,15 @@ public class CucumberRunnerService {
      */
     public RunResult run(String runId, String tags, String features, Map<String, String> runProperties)
             throws Exception {
-        String normalizedTags = (tags != null && !tags.isBlank()) ? normalizeLabel(tags) : null;
-        return dispatch(runId, normalizedTags, features, runProperties);
+        return dispatch(runId, tagExpressionForRun(tags), features, runProperties);
+    }
+
+    /**
+     * Vollständiger Tag-Ausdruck (z.B. {@code (@smoke) and (@env:dev or not (...))}) - anders als bei
+     * Labels wird kein {@code @} vorangestellt, das würde Ausdrücke mit Klammer am Anfang zerstören.
+     */
+    static String tagExpressionForRun(String tags) {
+        return (tags == null || tags.isBlank()) ? null : tags.strip();
     }
 
     private RunResult dispatch(String runId, String tags, String features) throws Exception {

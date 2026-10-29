@@ -1,5 +1,6 @@
 package org.example;
 
+import io.cucumber.tagexpressions.TagExpressionParser;
 import io.qameta.allure.Allure;
 import io.qameta.allure.AllureLifecycle;
 import io.qameta.allure.FileSystemResultsWriter;
@@ -66,6 +67,21 @@ class CucumberRunnerServiceTest {
     @Test
     void normalizeLabel_WithAtAndWhitespace_TrimsAndKeepsPrefix() throws Exception {
         assertEquals("@smoke", normalizeLabel("  @smoke  "));
+    }
+
+    @Test
+    void tagExpressionForRun_ParenthesizedExpression_KeptParseable() {
+        // Request-Tags UND @env:-Filter beginnen mit "(" - ein vorangestelltes "@" machte daraus Unsinn
+        String expr = "(@Backend) and (@env:test-t or not (@env:dev or @env:prod))";
+
+        assertEquals(expr, CucumberRunnerService.tagExpressionForRun("  " + expr + " "));
+        assertDoesNotThrow(() -> TagExpressionParser.parse(CucumberRunnerService.tagExpressionForRun(expr)));
+    }
+
+    @Test
+    void tagExpressionForRun_BlankOrNull_IsNull() {
+        assertNull(CucumberRunnerService.tagExpressionForRun(null));
+        assertNull(CucumberRunnerService.tagExpressionForRun("  "));
     }
 
     @Test

@@ -126,6 +126,25 @@ class TestExecutionServiceTest {
     }
 
     @Test
+    void queueTestExecution_AddsEnvironmentTagFilterToRequestTags() {
+        TestExecutionRequest request = createRequest("staging", List.of("@smoke", "@regression"));
+
+        TestExecutionResponse response = testExecutionService.queueTestExecution(request);
+
+        assertTrue(response.getTags().startsWith("(@smoke or @regression) and (@env:staging or not ("),
+                response.getTags());
+        assertTrue(response.getTags().contains("@env:dev"), response.getTags());
+        assertFalse(response.getTags().contains("@env:staging or @"), response.getTags());
+    }
+
+    @Test
+    void queueTestExecution_WithoutTags_UsesEnvironmentTagFilterOnly() {
+        TestExecutionResponse response = testExecutionService.queueTestExecution(createRequest("dev", null));
+
+        assertTrue(response.getTags().startsWith("@env:dev or not ("), response.getTags());
+    }
+
+    @Test
     void queueTestExecution_GeneratesUniqueRunIds() {
         TestExecutionRequest request = createRequest("dev", List.of("@smoke"));
 

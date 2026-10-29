@@ -198,6 +198,36 @@ Fehlen sie, schlägt der Step mit dem Namen der erwarteten Variable fehl.
    (`ENV_FEATURE_GUI_USER_ADMIN_PASSWORD`).
 3. Pod neu starten (ConfigMap-Änderungen) und aufrufen: `{"environment": "feature", ...}`.
 
+**Szenarien nur auf bestimmten Umgebungen ausführen (`@env:<umgebung>`):**
+
+Szenarien ohne `@env:`-Tag laufen in jeder Umgebung. Mit einem oder mehreren `@env:`-Tags laufen sie
+nur in den genannten Umgebungen. Die Tags werden wie alle Tags vererbt, ein Tag am `Feature`,
+an einer `Rule` oder an einem `Examples`-Block gilt also für alle Szenarien darunter.
+
+```gherkin
+@GUI
+Feature: Dashboard
+
+  Scenario: Login                       # alle Umgebungen
+
+  @env:staging @env:prod
+  Scenario: Export nach SAP             # nur staging und prod
+```
+
+Der Service verknüpft dazu die Tags aus dem Request per UND mit einem Umgebungsfilter. Bei
+`"environment": "staging"` und `"tags": ["@smoke"]` lautet der Cucumber-Ausdruck
+`(@smoke) and (@env:staging or not (@env:dev or @env:performance or @env:prod))`. Ausgefilterte
+Szenarien werden nicht gestartet. Sie erscheinen deshalb weder als „skipped“ im Report noch als
+Ergebnis in Zephyr. Der wirksame Ausdruck steht im Feld `tags` der Response.
+
+- Erlaubt sind nur Namen aus `test.environments`. Ein Unit-Test prüft die Feature-Dateien darauf.
+  Ein unbekannter Name, etwa durch einen Tippfehler wie `@env:stagign`, lässt das Szenario in
+  **keiner** Umgebung laufen, und der Service loggt eine Warnung.
+- Auch ein gezielt per Zeilennummer ausgewähltes Szenario (`"features": ["X.feature:12"]`) entfällt,
+  wenn es nicht für die Ziel-Umgebung freigegeben ist.
+- `@env:`-Tags lassen sich nicht über `tags` im Request angeben. Das ist auch nicht nötig, denn die
+  Umgebung kommt aus `environment`.
+
 **Response (202 Accepted):**
 ```json
 {
@@ -207,7 +237,7 @@ Fehlen sie, schlägt der Step mit dem Namen der erwarteten Variable fehl.
   "message": "Test execution queued successfully",
   "timestamp": "2026-02-11T14:30:00",
   "statusUrl": "/api/v1/test/status/550e8400-e29b-41d4-a716-446655440000",
-  "tags": "@smoke"
+  "tags": "(@smoke) and (@env:dev or not (@env:performance or @env:prod or @env:staging))"
 }
 ```
 
@@ -720,6 +750,7 @@ voll, antwortet der Dienst mit `429`. Volle Browser-Slots blockieren API-Läufe 
 | `@regression` | Vollständige Regressionstests        |
 | `@End2End`    | End-to-End UI-Tests                   |
 | `@API-Test`   | API-Tests                             |
+| `@env:<name>` | Szenario nur in dieser Ziel-Umgebung (siehe [Ziel-Umgebungen](#ziel-umgebungen)); nicht als Request-Tag |
 | `@T-3511`     | Einzelner Testfall (nach ID)          |
 | `@T-3512`     | Einzelner Testfall (nach ID)          |
 | `@T-3513`     | Einzelner Testfall (nach ID)          |

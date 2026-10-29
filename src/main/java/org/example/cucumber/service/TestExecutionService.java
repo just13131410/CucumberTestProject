@@ -82,6 +82,7 @@ public class TestExecutionService {
     private final RunStatusRegistry statusRegistry;
     private final AllureReportService allureReportService;
     private final BrowserDemand browserDemand;
+    private final EnvironmentTagFilter environmentTagFilter;
     private final ThreadPoolExecutor executor;
     /** In-Process identisch mit {@link #executor} (alles seriell), sonst eigener Pool. */
     private final ThreadPoolExecutor browserExecutor;
@@ -104,7 +105,9 @@ public class TestExecutionService {
         this.persistence = persistence;
         this.statusRegistry = statusRegistry;
         this.allureReportService = allureReportService;
-        this.browserDemand = new BrowserDemand(browserTags);
+        FeatureTags featureTags = new FeatureTags();
+        this.browserDemand = new BrowserDemand(browserTags, featureTags);
+        this.environmentTagFilter = new EnvironmentTagFilter(featureTags);
         this.isolated = "subprocess".equalsIgnoreCase(executionMode);
         if (!isolated && (maxConcurrentRuns > 1 || maxConcurrentBrowserRuns > 1)) {
             log.error("test.execution.max-concurrent-runs={} / max-concurrent-browser-runs={} ignoriert und "
@@ -161,7 +164,10 @@ public class TestExecutionService {
         statusRegistry.evictOldStatuses();
 
         UUID runId = UUID.randomUUID();
-        String tagsExpression = buildTagsExpression(request.getTags());
+        // Request-Tags UND @env:-Regel der Ziel-Umgebung (Szenarien nur für andere Umgebungen fallen weg).
+        String tagsExpression = EnvironmentTagFilter.and(
+                buildTagsExpression(request.getTags()),
+                environmentTagFilter.expressionFor(request.getEnvironment()));
         String features = request.getFeatures() != null
                 ? String.join(",", request.getFeatures())
                 : null;
@@ -176,7 +182,8 @@ public class TestExecutionService {
         statusRegistry.put(runId, status);
 
         // Browser-Läufe in eigenen, kleineren Pool (nur im Subprozess-Modus getrennt).
-        boolean browserRun = isolated && browserDemand.needsBrowser(request.getTags(), request.getFeatures());
+        boolean browserRun = isolated && browserDemand.needsBrowser(
+                request.getTags(), request.getFeatures(), request.getEnvironment());
         ThreadPoolExecutor pool = browserRun ? browserExecutor : executor;
         int poolSize = browserRun ? maxConcurrentBrowserRuns : maxConcurrentRuns;
 

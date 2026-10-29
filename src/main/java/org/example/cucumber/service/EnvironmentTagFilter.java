@@ -14,7 +14,8 @@ import java.util.stream.Collectors;
  * <p>
  * Regel: Ein Pickle ohne {@code @env:}-Tag läuft überall; eines mit {@code @env:}-Tags nur, wenn die
  * Ziel-Umgebung darunter ist. Umgesetzt als Cucumber-Tag-Ausdruck, der mit dem Tag-Filter des Requests
- * UND-verknüpft wird - ausgefilterte Szenarien tauchen so weder in Reports noch in Zephyr auf.
+ * UND-verknüpft wird - ausgefilterte Szenarien starten gar nicht erst und erscheinen nicht als
+ * "skipped" im Report; in Zephyr markiert sie {@code NotExecutedResults} mit Grund.
  * <p>
  * Cucumber kennt keine Tag-Wildcards, deshalb werden alle anderen Umgebungen explizit ausgeschlossen:
  * konfigurierte ({@code test.environments}) plus alle in den Features genannten. Letzteres sorgt dafür,
@@ -22,9 +23,9 @@ import java.util.stream.Collectors;
  * wird er als Warnung geloggt.
  */
 @Slf4j
-class EnvironmentTagFilter {
+public class EnvironmentTagFilter {
 
-    static final String PREFIX = "@env:";
+    public static final String PREFIX = "@env:";
 
     private final FeatureTags featureTags;
     private final Supplier<Collection<String>> configuredEnvironments;
@@ -77,7 +78,7 @@ class EnvironmentTagFilter {
     }
 
     /** Dieselbe Regel wie {@link #expression} direkt auf den Tags eines Pickles. */
-    static boolean selects(Set<String> pickleTags, String environment) {
+    static boolean selects(Collection<String> pickleTags, String environment) {
         if (environment == null || environment.isBlank()) {
             return true;
         }
@@ -85,7 +86,8 @@ class EnvironmentTagFilter {
         return envs.isEmpty() || envs.contains(environment);
     }
 
-    static Set<String> environmentsOf(Set<String> tags) {
+    /** Umgebungen aus den {@code @env:}-Tags, z.B. {@code [staging, prod]}. */
+    public static Set<String> environmentsOf(Collection<String> tags) {
         return tags.stream()
                 .filter(t -> t.startsWith(PREFIX) && t.length() > PREFIX.length())
                 .map(t -> t.substring(PREFIX.length()))

@@ -52,39 +52,28 @@ class BrowserDemand {
         if (browserTags.isEmpty()) {
             return false;
         }
-        Map<String, List<Set<String>>> parsed = featureTags.byFeature();
+        Map<String, List<List<String>>> parsed = featureTags.byFeature();
         if (parsed.isEmpty()) {
             log.debug("Keine Feature-Dateien lesbar – Lauf wird als Browser-Lauf behandelt");
             return true;
         }
-        Set<String> filter = tags == null ? Set.of() : tags.stream()
-                .map(BrowserDemand::withAt)
-                .collect(Collectors.toSet());
-
-        List<String> files = (features == null || features.isEmpty())
-                ? List.copyOf(parsed.keySet())
-                : features.stream().map(BrowserDemand::stripLineNumbers).toList();
+        ScenarioSelection selection = new ScenarioSelection(tags, features, environment);
+        Set<String> files = selection.files().isEmpty() ? parsed.keySet() : selection.files();
 
         for (String file : files) {
-            List<Set<String>> pickles = parsed.get(file);
+            List<List<String>> pickles = parsed.get(file);
             if (pickles == null) {
                 log.debug("Feature-Datei '{}' unbekannt – Lauf wird als Browser-Lauf behandelt", file);
                 return true;
             }
-            for (Set<String> pickleTags : pickles) {
-                boolean selected = (filter.isEmpty() || pickleTags.stream().anyMatch(filter::contains))
-                        && EnvironmentTagFilter.selects(pickleTags, environment);
-                if (selected && pickleTags.stream().anyMatch(browserTags::contains)) {
+            for (List<String> pickleTags : pickles) {
+                if (selection.classify(file, pickleTags) == ScenarioSelection.Outcome.SELECTED
+                        && pickleTags.stream().anyMatch(browserTags::contains)) {
                     return true;
                 }
             }
         }
         return false;
-    }
-
-    private static String stripLineNumbers(String feature) {
-        int colon = feature.indexOf(':');
-        return colon < 0 ? feature : feature.substring(0, colon);
     }
 
     private static String withAt(String tag) {

@@ -217,8 +217,10 @@ Feature: Dashboard
 Der Service verknüpft dazu die Tags aus dem Request per UND mit einem Umgebungsfilter. Bei
 `"environment": "staging"` und `"tags": ["@smoke"]` lautet der Cucumber-Ausdruck
 `(@smoke) and (@env:staging or not (@env:dev or @env:performance or @env:prod))`. Ausgefilterte
-Szenarien werden nicht gestartet. Sie erscheinen deshalb weder als „skipped“ im Report noch als
-Ergebnis in Zephyr. Der wirksame Ausdruck steht im Feld `tags` der Response.
+Szenarien werden nicht gestartet und erscheinen deshalb nicht als „skipped“ im Report. Steht ihr
+Testfall über das Zephyr-Template im Testrun, wird er dort mit Grund als nicht ausgeführt markiert
+(siehe [Nicht ausgeführte Testfälle](#nicht-ausgeführte-testfälle-in-zephyr)). Der wirksame Ausdruck
+steht im Feld `tags` der Response.
 
 - Erlaubt sind nur Namen aus `test.environments`. Ein Unit-Test prüft die Feature-Dateien darauf.
   Ein unbekannter Name, etwa durch einen Tippfehler wie `@env:stagign`, lässt das Szenario in
@@ -775,6 +777,27 @@ Tag-Ausdrücke mit `and`, `not` oder Klammern werden abgelehnt (400).
   `zephyr.outline-rows-as-test-data=true` setzen: Dann wird der Schritt-Status je Zeile fortlaufend
   gesendet. Die Reihenfolge der `Examples`-Zeilen muss der der Zephyr-Datenzeilen entsprechen.
 - Ein fehlgeschlagener Before-/After-Hook (z.B. Screenshot) führt ebenfalls zu `Fail`.
+
+#### Nicht ausgeführte Testfälle in Zephyr
+
+Wird der Testrun aus einem Template angelegt (`zephyr.template-test-run-key` bzw.
+`zephyrTemplateTestRunKey`), bekommen alle Testfälle des Templates ein Ergebnis, auch die ohne
+Cucumber-Ergebnis. Diese werden in einem eigenen Upload nach den echten Ergebnissen gesendet. Der
+Kommentar beginnt mit „Nicht ausgeführt:“ und nennt den Grund:
+
+| Grund | Status | Kommentar (Beispiel) |
+|-------|--------|----------------------|
+| Alle Szenarien des Testfalls per `@env:` für andere Umgebungen | `zephyr.env-excluded-status` | Nicht für Umgebung **dev** freigegeben (nur: prod, staging) |
+| Szenario passt nicht zu `tags`/`features` des Requests (auch bei Auswahl per Zeilennummer) | `zephyr.not-executed-status` | Nicht im Lauf ausgewählt (Tags: @Backend) |
+| Szenario war ausgewählt, lieferte aber kein Ergebnis | `zephyr.not-executed-status` | Szenario war ausgewählt, hat aber kein Ergebnis geliefert (Lauf abgebrochen …) |
+| Kein Szenario mit diesem `@T-`-Tag in den Features | `zephyr.not-executed-status` | Kein automatisiertes Szenario mit Tag @PROJ-T99 vorhanden |
+
+Beide Status sind standardmäßig `Not Executed` (Env `ZEPHYR_NOT_EXECUTED_STATUS` bzw.
+`ZEPHYR_ENV_EXCLUDED_STATUS`). Für einen eigenen Status, etwa „Not Applicable“ für
+Umgebungs-Ausschlüsse, muss der Status im Zephyr-Projekt angelegt sein. Ist er dort unbekannt,
+lehnt Zephyr nur diesen zweiten Upload ab, die echten Ergebnisse sind dann schon gespeichert. Die
+markierten Keys stehen im Lauf-Status unter `metadata.zephyrNotExecuted`. Ohne Template enthält der
+Testrun nur die ausgeführten Testfälle, dann gibt es nichts zu markieren.
 
 ---
 

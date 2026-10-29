@@ -2,10 +2,12 @@ package org.example.integration;
 
 import org.example.cucumber.model.TestExecutionRequest;
 import org.example.cucumber.model.TestStatus;
+import org.example.cucumber.service.FeatureTags;
 import org.example.integration.jira.JiraClient;
 import org.example.integration.model.*;
 import org.example.integration.zephyr.CucumberResultReader;
 import org.example.integration.zephyr.MockIntegrationService;
+import org.example.integration.zephyr.NotExecutedResults;
 import org.example.integration.zephyr.ZephyrScaleClient;
 import org.example.integration.zephyr.ZephyrScaleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,9 +19,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -38,12 +42,26 @@ class ZephyrScaleServiceTest {
 
     private MockIntegrationService mockIntegrationService;
 
+    private static final String ENV_FEATURE = """
+            Feature: Umgebungen
+
+              @T-3511 @Backend
+              Scenario: Überall
+                Given x
+
+              @T-3512 @Backend @env:prod
+              Scenario: Nur prod
+                Given x
+            """;
+
     @BeforeEach
     void setUp() {
         mockIntegrationService = new MockIntegrationService();
         ReflectionTestUtils.setField(mockIntegrationService, "zephyrBaseUrl", "https://jira.test.com");
 
-        service = new ZephyrScaleService(zephyrClient, jiraClient, new CucumberResultReader(false), mockIntegrationService);
+        FeatureTags featureTags = new FeatureTags(() -> Map.of("Env.feature", ENV_FEATURE.getBytes(StandardCharsets.UTF_8)));
+        service = new ZephyrScaleService(zephyrClient, jiraClient, new CucumberResultReader(false), mockIntegrationService,
+                new NotExecutedResults(featureTags, "Not Executed", "Not Applicable"));
         ReflectionTestUtils.setField(service, "zephyrEnabled", true);
         ReflectionTestUtils.setField(service, "defaultProjectKey", "PROJ");
         ReflectionTestUtils.setField(service, "jiraEnabled", false);
@@ -249,6 +267,75 @@ class ZephyrScaleServiceTest {
         } finally {
             System.clearProperty("test.results.path");
         }
+    }
+
+    @Test
+    void uploadRunResults_TemplateCasesWithoutResult_UploadedSeparatelyWithReason(@TempDir Path tempDir) throws IOException {
+        String cucumberJson = """
+                [{"elements": [
+                  {"tags": [{"name": "@T-3511"}, {"name": "@Backend"}],
+                   "steps": [{"result": {"status": "passed"}}]}
+                ]}]
+                """;
+        UUID runId = UUID.randomUUID();
+        Path cucumberDir = tempDir.resolve(runId.toString()).resolve("cucumber-reports");
+        Files.createDirectories(cucumberDir);
+        Files.writeString(cucumberDir.resolve("Cucumber.json"), cucumberJson);
+        ReflectionTestUtils.setField(service, "templateTestRunKey", "PROJ-R1");
+        ZephyrTestRun template = new ZephyrTestRun();
+        template.setItems(List.of(item("T-3511"), item("T-3512")));
+        when(zephyrClient.getTestRun("PROJ-R1")).thenReturn(template);
+
+        System.setProperty("test.results.path", tempDir.toString());
+        try {
+            stubCycle("T-R1");
+            TestStatus status = new TestStatus();
+
+            service.uploadRunResults(runId, createRequest(List.of("@Backend")), 0, status);
+
+            var order = inOrder(zephyrClient);
+            order.verify(zephyrClient).uploadTestResults(eq("T-R1"), argThat(execs ->
+                    execs.size() == 1 && "T-3511".equals(execs.get(0).getTestCaseKey())));
+            order.verify(zephyrClient).uploadTestResults(eq("T-R1"), argThat(execs ->
+                    execs.size() == 1
+                            && "T-3512".equals(execs.get(0).getTestCaseKey())
+                            && "Not Applicable".equals(execs.get(0).getStatus())
+                            && execs.get(0).getComment().contains("Umgebung <b>dev</b>")));
+            assertEquals(List.of("T-3512"), status.getMetadata().get("zephyrNotExecuted"));
+        } finally {
+            System.clearProperty("test.results.path");
+        }
+    }
+
+    @Test
+    void uploadRunResults_AllTemplateCasesReported_NoSecondUpload(@TempDir Path tempDir) throws IOException {
+        ReflectionTestUtils.setField(service, "templateTestRunKey", "PROJ-R1");
+        ZephyrTestRun template = new ZephyrTestRun();
+        template.setItems(List.of(item("T-3511")));
+        when(zephyrClient.getTestRun("PROJ-R1")).thenReturn(template);
+        UUID runId = UUID.randomUUID();
+        Path cucumberDir = tempDir.resolve(runId.toString()).resolve("cucumber-reports");
+        Files.createDirectories(cucumberDir);
+        Files.writeString(cucumberDir.resolve("Cucumber.json"), """
+                [{"elements": [{"tags": [{"name": "@T-3511"}], "steps": [{"result": {"status": "passed"}}]}]}]
+                """);
+
+        System.setProperty("test.results.path", tempDir.toString());
+        try {
+            stubCycle("T-R1");
+
+            service.uploadRunResults(runId, createRequest(List.of("@Backend")), 0, new TestStatus());
+
+            verify(zephyrClient, times(1)).uploadTestResults(any(), any());
+        } finally {
+            System.clearProperty("test.results.path");
+        }
+    }
+
+    private static ZephyrTestRunItem item(String testCaseKey) {
+        ZephyrTestRunItem item = new ZephyrTestRunItem();
+        item.setTestCaseKey(testCaseKey);
+        return item;
     }
 
     // --- Report-Attachments (Cucumber-/Axe-Report auf Cycle-Ebene) ---

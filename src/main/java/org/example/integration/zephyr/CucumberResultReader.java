@@ -301,9 +301,14 @@ public class CucumberResultReader {
      */
     private String extractTestCaseKey(List<CucumberTag> tags) {
         if (tags == null) return null;
-        return tags.stream()
-                .filter(t -> t.getName() != null && TEST_CASE_TAG.matcher(t.getName()).matches())
-                .map(t -> t.getName().substring(1))
+        return testCaseKeyOf(tags.stream().map(CucumberTag::getName).toList());
+    }
+
+    /** Testfall-Key (ohne {@code @}) aus Tag-Namen in Vererbungsreihenfolge; {@code null}, wenn keiner passt. */
+    public static String testCaseKeyOf(List<String> tagNames) {
+        return tagNames.stream()
+                .filter(t -> t != null && TEST_CASE_TAG.matcher(t).matches())
+                .map(t -> t.substring(1))
                 .reduce((first, second) -> second)
                 .orElse(null);
     }

@@ -32,6 +32,7 @@ public class ZephyrScaleService {
     private final JiraClient jiraClient;
     private final CucumberResultReader cucumberResultReader;
     private final MockIntegrationService mockIntegrationService;
+    private final NotExecutedResults notExecutedResults;
 
     @Value("${zephyr.enabled:false}")
     private boolean zephyrEnabled;
@@ -147,7 +148,8 @@ public class ZephyrScaleService {
 
     private void uploadToZephyr(UUID runId, TestExecutionRequest request, int exitCode,
                                 TestStatus status, String projectKey) {
-        String cycleKey = createCycle(runId, request, projectKey);
+        List<String> plannedKeys = cloneTestCaseKeys(resolveTemplateTestRunKey(request));
+        String cycleKey = createCycle(runId, request, projectKey, plannedKeys);
         if (cycleKey == null) {
             log.warn("Failed to create Zephyr test run for runId={}", runId);
             return;
@@ -159,6 +161,17 @@ public class ZephyrScaleService {
         if (!executions.isEmpty()) {
             zephyrClient.uploadTestResults(cycleKey, executions);
             StatusMetadataSupport.addMetadata(status, "zephyrExecutions", executions.stream()
+                    .map(ZephyrTestExecution::getTestCaseKey)
+                    .collect(Collectors.toList()));
+        }
+
+        // Eigener Upload: ein in Zephyr unbekannter Status (zephyr.not-executed-status) lehnt nur diesen
+        // Batch ab, die echten Ergebnisse oben sind dann bereits angekommen.
+        List<ZephyrTestExecution> notExecuted = notExecutedResults.build(plannedKeys,
+                executions.stream().map(ZephyrTestExecution::getTestCaseKey).toList(), request);
+        if (!notExecuted.isEmpty()) {
+            zephyrClient.uploadTestResults(cycleKey, notExecuted);
+            StatusMetadataSupport.addMetadata(status, "zephyrNotExecuted", notExecuted.stream()
                     .map(ZephyrTestExecution::getTestCaseKey)
                     .collect(Collectors.toList()));
         }
@@ -191,7 +204,8 @@ public class ZephyrScaleService {
         return defaultProjectKey;
     }
 
-    private String createCycle(UUID runId, TestExecutionRequest request, String projectKey) {
+    private String createCycle(UUID runId, TestExecutionRequest request, String projectKey,
+                               List<String> testCaseKeys) {
         String shortRunId = runId.toString().substring(0, 8);
         String tags = request.getTags() != null ? String.join(" ", request.getTags()) : "";
         String date = LocalDate.now().format(DATE_FMT);
@@ -204,9 +218,8 @@ public class ZephyrScaleService {
         if (folder != null && !folder.isBlank()) {
             body.put("folder", folder);
         }
-        List<Map<String, String>> clonedItems = cloneTestCaseItems(resolveTemplateTestRunKey(request));
-        if (!clonedItems.isEmpty()) {
-            body.put("items", clonedItems);
+        if (!testCaseKeys.isEmpty()) {
+            body.put("items", testCaseKeys.stream().map(key -> Map.of("testCaseKey", key)).toList());
         }
 
         ZephyrTestCycle cycle = zephyrClient.createTestCycle(body);
@@ -231,11 +244,11 @@ public class ZephyrScaleService {
 
     /**
      * Liest die Testfaelle des Template-Testruns ({@code templateKey}, aufgeloest aus Request-Override
-     * oder {@code zephyr.template-test-run-key}) und baut daraus die "items"-Liste fuer POST /testrun,
+     * oder {@code zephyr.template-test-run-key}); daraus entsteht die "items"-Liste fuer POST /testrun,
      * damit der neu angelegte Testrun dieselben Testfaelle enthaelt ("klonen"). Ohne Template-Key oder
      * falls der Template-Testrun nicht lesbar ist, wird der neue Testrun ohne vorbelegte Testfaelle angelegt.
      */
-    private List<Map<String, String>> cloneTestCaseItems(String templateKey) {
+    private List<String> cloneTestCaseKeys(String templateKey) {
         if (templateKey == null || templateKey.isBlank()) {
             return List.of();
         }
@@ -247,8 +260,8 @@ public class ZephyrScaleService {
         return template.getItems().stream()
                 .map(ZephyrTestRunItem::getTestCaseKey)
                 .filter(Objects::nonNull)
-                .map(key -> Map.of("testCaseKey", key))
-                .collect(Collectors.toList());
+                .distinct()
+                .toList();
     }
 
     private void createJiraTicket(UUID runId, TestExecutionRequest request,

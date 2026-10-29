@@ -21,26 +21,27 @@ import java.util.stream.Stream;
 /**
  * Wirksame Tags aller Pickles je Feature-Datei (Feature, Rule, Szenario, Examples bereits vererbt),
  * lazy geparst und danach gecacht. Gemeinsame Grundlage für {@link BrowserDemand} und
- * {@link EnvironmentTagFilter}.
+ * {@link EnvironmentTagFilter} sowie für die Zephyr-Markierung nicht ausgeführter Testfälle.
+ * Die Tags je Pickle behalten die Gherkin-Reihenfolge (Feature, Rule, Szenario, Examples).
  */
 @Slf4j
-class FeatureTags {
+public class FeatureTags {
 
     private final Supplier<Map<String, byte[]>> featureSource;
     /** Feature-Datei (relativ zu features/) → wirksame Tags je Pickle. */
-    private volatile Map<String, List<Set<String>>> pickleTagsByFeature;
+    private volatile Map<String, List<List<String>>> pickleTagsByFeature;
 
-    FeatureTags() {
+    public FeatureTags() {
         this(FeatureTags::loadClasspathFeatures);
     }
 
-    FeatureTags(Supplier<Map<String, byte[]>> featureSource) {
+    public FeatureTags(Supplier<Map<String, byte[]>> featureSource) {
         this.featureSource = featureSource;
     }
 
     /** Leer, wenn keine Feature-Datei lesbar ist. */
-    Map<String, List<Set<String>>> byFeature() {
-        Map<String, List<Set<String>>> result = pickleTagsByFeature;
+    public Map<String, List<List<String>>> byFeature() {
+        Map<String, List<List<String>>> result = pickleTagsByFeature;
         if (result == null) {
             result = parse(featureSource.get());
             pickleTagsByFeature = result;
@@ -56,13 +57,13 @@ class FeatureTags {
                 .collect(Collectors.toCollection(TreeSet::new));
     }
 
-    static Map<String, List<Set<String>>> parse(Map<String, byte[]> sources) {
+    static Map<String, List<List<String>>> parse(Map<String, byte[]> sources) {
         GherkinParser parser = GherkinParser.builder()
                 .includeSource(false)
                 .includeGherkinDocument(false)
                 .includePickles(true)
                 .build();
-        Map<String, List<Set<String>>> result = new HashMap<>();
+        Map<String, List<List<String>>> result = new HashMap<>();
         sources.forEach((file, content) -> result.put(file, parser.parse(file, content)
                 .map(Envelope::getPickle)
                 .flatMap(Optional::stream)
@@ -71,8 +72,8 @@ class FeatureTags {
         return result;
     }
 
-    private static Set<String> tagsOf(Pickle pickle) {
-        return pickle.getTags().stream().map(PickleTag::getName).collect(Collectors.toUnmodifiableSet());
+    private static List<String> tagsOf(Pickle pickle) {
+        return pickle.getTags().stream().map(PickleTag::getName).distinct().toList();
     }
 
     /** Alle {@code *.feature} unter {@code classpath:features}; leer, wenn nicht als Verzeichnis lesbar. */

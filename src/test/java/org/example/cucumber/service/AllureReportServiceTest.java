@@ -2,6 +2,8 @@ package org.example.cucumber.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.cucumber.model.TestExecutionRequest;
+import org.example.utils.RunName;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,6 +11,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -23,63 +30,91 @@ class AllureReportServiceTest {
 
     // --- sortSuitesNewestFirst tests (private method via reflection) ---
 
-    private void sortSuitesNewestFirst(Path reportDir) throws Exception {
-        Method method = AllureReportService.class.getDeclaredMethod("sortSuitesNewestFirst", Path.class);
+    private void sortSuitesNewestFirst(Path reportDir, Map<String, Long> suiteTimestamps) throws Exception {
+        Method method = AllureReportService.class.getDeclaredMethod("sortSuitesNewestFirst", Path.class, Map.class);
         method.setAccessible(true);
-        method.invoke(allureReportService, reportDir);
+        method.invoke(allureReportService, reportDir, suiteTimestamps);
     }
 
     @Test
-    void sortSuitesNewestFirst_WidgetAndDataSuites_OrderedNewestFirst(@TempDir Path tempDir) throws Exception {
+    void sortSuitesNewestFirst_WidgetAndDataSuites_OrderedByRunTimestampNewestFirst(@TempDir Path tempDir) throws Exception {
         Path widgetsDir = Files.createDirectories(tempDir.resolve("widgets"));
         Path dataDir = Files.createDirectories(tempDir.resolve("data"));
 
+        // Gleicher Tag: nach Namen stuende [dev] vor [staging], der staging-Run ist aber der neuere
+        String older = "20260727 [staging] 938da71e @Frontend";
+        String newer = "20260727 [dev] f3dbe6c2 @Backend";
         Files.writeString(widgetsDir.resolve("suites.json"), """
                 {
                   "total": 2,
                   "items": [
-                    {"uid": "a", "name": "202602231349 938da71e @Frontend"},
-                    {"uid": "b", "name": "202607271559 f3dbe6c2 @Backend"}
+                    {"uid": "a", "name": "%s"},
+                    {"uid": "b", "name": "%s"}
                   ]
-                }""");
+                }""".formatted(older, newer));
         Files.writeString(dataDir.resolve("suites.json"), """
                 {
                   "uid": "root",
                   "name": "suites",
                   "children": [
-                    {"name": "202602231349 938da71e @Frontend", "children": []},
-                    {"name": "202607271559 f3dbe6c2 @Backend", "children": []}
+                    {"name": "%s", "children": []},
+                    {"name": "%s", "children": []}
                   ]
-                }""");
+                }""".formatted(older, newer));
 
-        sortSuitesNewestFirst(tempDir);
+        sortSuitesNewestFirst(tempDir, Map.of(older, 1000L, newer, 2000L));
 
         ObjectMapper mapper = new ObjectMapper();
         JsonNode widgetItems = mapper.readTree(widgetsDir.resolve("suites.json").toFile()).get("items");
-        assertEquals("202607271559 f3dbe6c2 @Backend", widgetItems.get(0).get("name").asText());
-        assertEquals("202602231349 938da71e @Frontend", widgetItems.get(1).get("name").asText());
+        assertEquals(newer, widgetItems.get(0).get("name").asText());
+        assertEquals(older, widgetItems.get(1).get("name").asText());
 
         JsonNode dataChildren = mapper.readTree(dataDir.resolve("suites.json").toFile()).get("children");
-        assertEquals("202607271559 f3dbe6c2 @Backend", dataChildren.get(0).get("name").asText());
-        assertEquals("202602231349 938da71e @Frontend", dataChildren.get(1).get("name").asText());
+        assertEquals(newer, dataChildren.get(0).get("name").asText());
+        assertEquals(older, dataChildren.get(1).get("name").asText());
+    }
+
+    @Test
+    void sortSuitesNewestFirst_UnknownSuitesLast(@TempDir Path tempDir) throws Exception {
+        Path widgetsDir = Files.createDirectories(tempDir.resolve("widgets"));
+        Files.writeString(widgetsDir.resolve("suites.json"), """
+                {"items": [{"name": "unbekannt"}, {"name": "20260727 [dev] f3dbe6c2"}]}""");
+
+        sortSuitesNewestFirst(tempDir, Map.of("20260727 [dev] f3dbe6c2", 1000L));
+
+        JsonNode items = new ObjectMapper().readTree(widgetsDir.resolve("suites.json").toFile()).get("items");
+        assertEquals("20260727 [dev] f3dbe6c2", items.get(0).get("name").asText());
+        assertEquals("unbekannt", items.get(1).get("name").asText());
     }
 
     @Test
     void sortSuitesNewestFirst_MissingFiles_DoesNotThrow(@TempDir Path tempDir) {
-        assertDoesNotThrow(() -> sortSuitesNewestFirst(tempDir));
+        assertDoesNotThrow(() -> sortSuitesNewestFirst(tempDir, Map.of()));
     }
 
-    // --- readTagsFromExecutorJson tests (private method via reflection) ---
+    // --- readRunName tests (private method via reflection) ---
 
-    private String readTagsFromExecutorJson(Path dir) throws Exception {
-        Method method = AllureReportService.class.getDeclaredMethod("readTagsFromExecutorJson", Path.class);
+    private static final UUID RUN_ID = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+    private static final long JULY_27_NOON = LocalDate.of(2026, 7, 27).atTime(12, 0)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+
+    private String readRunName(Path dir, long timestamp) throws Exception {
+        Method method = AllureReportService.class.getDeclaredMethod("readRunName", Path.class, UUID.class, long.class);
         method.setAccessible(true);
-        return (String) method.invoke(allureReportService, dir);
+        return (String) method.invoke(allureReportService, dir, RUN_ID, timestamp);
     }
 
     @Test
-    void readTagsFromExecutorJson_WithTags_ReturnsTags(@TempDir Path tempDir) throws Exception {
-        String executorJson = """
+    void readRunName_CurrentFormat_ReturnedAsIs(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("executor.json"), """
+                {"buildName": "20260727 [staging] 550e8400 @Backend", "reportName": "20260727 [staging] 550e8400 @Backend"}""");
+
+        assertEquals("20260727 [staging] 550e8400 @Backend", readRunName(tempDir, JULY_27_NOON));
+    }
+
+    @Test
+    void readRunName_LegacyFormatWithTags_RebuiltWithEnvironmentAndDate(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("executor.json"), """
                 {
                   "name": "Cucumber Test Service",
                   "type": "api",
@@ -87,48 +122,54 @@ class AllureReportServiceTest {
                   "buildOrder": 1234567890,
                   "reportName": "Run 550e8400 [dev] @Backend, @smoke",
                   "reportUrl": "/reports/550e8400/allure-report/index.html"
-                }""";
-        Files.writeString(tempDir.resolve("executor.json"), executorJson);
+                }""");
 
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("@Backend, @smoke", tags);
+        assertEquals("20260727 [dev] 550e8400 @Backend @smoke", readRunName(tempDir, JULY_27_NOON));
     }
 
     @Test
-    void readTagsFromExecutorJson_WithoutTags_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
-        String executorJson = """
-                {
-                  "name": "Cucumber Test Service",
-                  "type": "api",
-                  "buildName": "Run 550e8400",
-                  "buildOrder": 1234567890,
-                  "reportName": "Run 550e8400 [dev] ",
-                  "reportUrl": "/reports/550e8400/allure-report/index.html"
-                }""";
-        Files.writeString(tempDir.resolve("executor.json"), executorJson);
+    void readRunName_LegacyFormatWithoutTags(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("executor.json"), """
+                {"buildName": "Run 550e8400", "reportName": "Run 550e8400 [dev] "}""");
 
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("", tags);
+        assertEquals("20260727 [dev] 550e8400", readRunName(tempDir, JULY_27_NOON));
     }
 
     @Test
-    void readTagsFromExecutorJson_NoExecutorFile_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("", tags);
+    void readRunName_NoExecutorFile_OnlyRunId(@TempDir Path tempDir) throws Exception {
+        assertEquals("550e8400", readRunName(tempDir, 0L));
     }
 
     @Test
-    void readTagsFromExecutorJson_NoReportNameField_ReturnsEmpty(@TempDir Path tempDir) throws Exception {
-        String executorJson = """
-                {
-                  "name": "Cucumber Test Service",
-                  "type": "api",
-                  "buildName": "Run 550e8400"
-                }""";
-        Files.writeString(tempDir.resolve("executor.json"), executorJson);
+    void readRunName_NoReportNameField_DateAndRunId(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("executor.json"), """
+                {"name": "Cucumber Test Service", "type": "api", "buildName": "Run 550e8400"}""");
 
-        String tags = readTagsFromExecutorJson(tempDir);
-        assertEquals("", tags);
+        assertEquals("20260727 550e8400", readRunName(tempDir, JULY_27_NOON));
+    }
+
+    // --- writeExecutorJson ---
+
+    @Test
+    void writeExecutorJson_UsesUnifiedRunName(@TempDir Path tempDir) throws Exception {
+        Files.createDirectories(tempDir.resolve(RUN_ID.toString()).resolve("allure-results"));
+        TestExecutionRequest request = new TestExecutionRequest();
+        request.setEnvironment("staging");
+        request.setTags(List.of("@SmokeTest", "@API-Test"));
+
+        System.setProperty("test.results.path", tempDir.toString());
+        try {
+            allureReportService.writeExecutorJson(RUN_ID, request);
+        } finally {
+            System.clearProperty("test.results.path");
+        }
+
+        JsonNode executor = new ObjectMapper().readTree(
+                tempDir.resolve(RUN_ID.toString()).resolve("allure-results").resolve("executor.json").toFile());
+        String expected = RunName.of(LocalDate.now(), RUN_ID, "staging", List.of("@SmokeTest", "@API-Test"));
+        assertEquals(expected, executor.get("reportName").asText());
+        assertEquals(expected, executor.get("buildName").asText());
+        assertTrue(expected.contains(" [staging] 550e8400 @SmokeTest @API-Test"), expected);
     }
 
     // --- getTestReport / generateAllureReport / getReportUrl (non-existing) ---

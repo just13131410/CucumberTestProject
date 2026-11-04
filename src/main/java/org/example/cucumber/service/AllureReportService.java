@@ -9,18 +9,21 @@ import io.qameta.allure.ReportGenerator;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.example.cucumber.model.TestExecutionRequest;
+import org.example.utils.RunName;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +32,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -42,7 +47,8 @@ import java.util.stream.Stream;
 @Component
 public class AllureReportService {
 
-    private static final DateTimeFormatter RUN_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
+    /** executor.json-{@code reportName} vor der Vereinheitlichung: {@code Run <id> [<env>] <tag>, <tag>}. */
+    private static final Pattern LEGACY_REPORT_NAME = Pattern.compile("Run \\S+ \\[([^]]*)] ?(.*)");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -151,16 +157,22 @@ public class AllureReportService {
 
     /**
      * Allure gruppiert Suites intern in einer vom Dateisystem abhängigen, nicht chronologischen
-     * Reihenfolge. Da jeder Suite-Name mit dem in {@link #copyAndEnrichResults} erzeugten Präfix
-     * {@code yyyyMMddHHmm} beginnt, wird hier absteigend nach Namen sortiert, damit im Overview-
-     * Widget und auf der Suites-Seite der neueste Run zuerst erscheint.
+     * Reihenfolge. Hier wird nach dem Zeitstempel des Runs ({@code suiteTimestamps}: Suite-Name aus
+     * {@link #copyAndEnrichResults} → buildOrder) absteigend sortiert, damit im Overview-Widget und auf
+     * der Suites-Seite der neueste Run zuerst erscheint. Der Name allein reicht nicht: er enthält nur
+     * das Datum, Runs eines Tages stünden sonst nach Umgebung statt nach Uhrzeit. Unbekannte Suites
+     * kommen ans Ende, untereinander absteigend nach Namen.
      */
-    private void sortSuitesNewestFirst(Path reportDir) {
-        sortJsonArrayFieldDescendingByName(reportDir.resolve("widgets").resolve("suites.json"), "items");
-        sortJsonArrayFieldDescendingByName(reportDir.resolve("data").resolve("suites.json"), "children");
+    private void sortSuitesNewestFirst(Path reportDir, Map<String, Long> suiteTimestamps) {
+        Comparator<JsonNode> newestFirst = Comparator
+                .comparingLong((JsonNode n) -> suiteTimestamps.getOrDefault(n.path("name").asText(""), Long.MIN_VALUE))
+                .thenComparing(n -> n.path("name").asText(""))
+                .reversed();
+        sortJsonArrayField(reportDir.resolve("widgets").resolve("suites.json"), "items", newestFirst);
+        sortJsonArrayField(reportDir.resolve("data").resolve("suites.json"), "children", newestFirst);
     }
 
-    private void sortJsonArrayFieldDescendingByName(Path jsonFile, String arrayField) {
+    private void sortJsonArrayField(Path jsonFile, String arrayField, Comparator<JsonNode> order) {
         if (!Files.exists(jsonFile)) {
             return;
         }
@@ -172,7 +184,7 @@ public class AllureReportService {
             }
             List<JsonNode> items = new ArrayList<>();
             array.forEach(items::add);
-            items.sort(Comparator.comparing((JsonNode n) -> n.path("name").asText("")).reversed());
+            items.sort(order);
             ArrayNode sorted = objectMapper.createArrayNode();
             sorted.addAll(items);
             root.set(arrayField, sorted);
@@ -267,11 +279,13 @@ public class AllureReportService {
 
             // Create temp directory with enriched copies of all allure-results
             tempDir = Files.createTempDirectory("allure-combined-");
+            Map<String, Long> suiteTimestamps = new HashMap<>();
             for (int i = 0; i < sortedRuns.size(); i++) {
                 RunEntry run = sortedRuns.get(i);
                 Path sourceDir = getResultsPath(run.id()).resolve("allure-results");
                 Path targetDir = tempDir.resolve(run.id().toString());
-                copyAndEnrichResults(sourceDir, targetDir, run.id(), i + 1, run.timestamp());
+                String suiteLabel = copyAndEnrichResults(sourceDir, targetDir, run.id(), i + 1, run.timestamp());
+                suiteTimestamps.put(suiteLabel, run.timestamp());
             }
 
             // Copy history from previous combined report to newest run's temp dir (enables trends)
@@ -284,7 +298,7 @@ public class AllureReportService {
                     .map(run -> resolvedTempDir.resolve(run.id().toString()))
                     .collect(Collectors.toList());
             generateWithJavaApi(combinedReportDir, resultDirs);
-            sortSuitesNewestFirst(combinedReportDir);
+            sortSuitesNewestFirst(combinedReportDir, suiteTimestamps);
 
             Path indexHtml = combinedReportDir.resolve("index.html");
             if (Files.exists(indexHtml)) {
@@ -311,24 +325,12 @@ public class AllureReportService {
         }
     }
 
-    private void copyAndEnrichResults(Path sourceDir, Path targetDir, UUID runId,
-                                      long buildOrder, long runTimestamp) throws IOException {
+    /** Kopiert die Ergebnisse eines Runs angereichert nach {@code targetDir} und liefert den Suite-Namen des Runs. */
+    private String copyAndEnrichResults(Path sourceDir, Path targetDir, UUID runId,
+                                        long buildOrder, long runTimestamp) throws IOException {
         Files.createDirectories(targetDir);
-        String runLabel = runId.toString().substring(0, 8);
-
-        // Format the run timestamp as yyyyMMddHHmm (e.g. 202602191316)
-        String formattedDate = runTimestamp > 0
-                ? LocalDateTime.ofInstant(Instant.ofEpochMilli(runTimestamp), ZoneId.systemDefault())
-                        .format(RUN_DATE_FMT)
-                : "";
-
-        // Read tags from existing executor.json (written during test execution)
-        String runTags = readTagsFromExecutorJson(sourceDir);
-
-        // Build label:  <yyyyMMddHHmm> <shortId> <tags>
-        String suiteLabel = (formattedDate.isEmpty() ? "" : formattedDate + " ")
-                + runLabel
-                + (runTags.isEmpty() ? "" : " " + runTags);
+        String runLabel = RunName.shortRunId(runId);
+        String suiteLabel = readRunName(sourceDir, runId, runTimestamp);
 
         try (var files = Files.list(sourceDir)) {
             files.forEach(source -> {
@@ -351,6 +353,7 @@ public class AllureReportService {
         // Write executor.json for this run
         Files.writeString(targetDir.resolve("executor.json"),
                 buildExecutorJson(suiteLabel, buildOrder, null, runId.toString()));
+        return suiteLabel;
     }
 
     /** Adds a parentSuite/tag label with runId + tags and makes historyId unique per run. */
@@ -373,19 +376,30 @@ public class AllureReportService {
         objectMapper.writeValue(target.toFile(), result);
     }
 
-    private String readTagsFromExecutorJson(Path allureResultsDir) {
+    /**
+     * Liefert den {@link RunName} eines Runs aus dessen executor.json ({@code reportName}). Runs von vor
+     * der Vereinheitlichung haben dort noch {@code Run <id> [<env>] <tag>, <tag>}; der Name wird dann aus
+     * Umgebung, Tags und dem Zeitstempel des Runs neu aufgebaut. Ohne executor.json bleibt nur die runId.
+     */
+    private String readRunName(Path allureResultsDir, UUID runId, long runTimestamp) {
+        LocalDate date = runTimestamp > 0
+                ? LocalDate.ofInstant(Instant.ofEpochMilli(runTimestamp), ZoneId.systemDefault())
+                : null;
         Path executorFile = allureResultsDir.resolve("executor.json");
         if (!Files.exists(executorFile)) {
-            return "";
+            return RunName.of(date, runId, null, null);
         }
         try {
-            // reportName format: "<buildName> [<env>] <tags>" - tags are everything after "]"
-            String reportName = objectMapper.readTree(executorFile.toFile()).path("reportName").asText("");
-            int bracketEnd = reportName.indexOf(']');
-            return bracketEnd < 0 ? "" : reportName.substring(bracketEnd + 1).trim();
+            String reportName = objectMapper.readTree(executorFile.toFile()).path("reportName").asText("").trim();
+            Matcher legacy = LEGACY_REPORT_NAME.matcher(reportName);
+            if (legacy.matches()) {
+                List<String> tags = Arrays.asList(legacy.group(2).split(","));
+                return RunName.of(date, runId, legacy.group(1), tags);
+            }
+            return reportName.isEmpty() ? RunName.of(date, runId, null, null) : reportName;
         } catch (IOException e) {
             log.warn("Failed to read executor.json from {}", allureResultsDir, e);
-            return "";
+            return RunName.of(date, runId, null, null);
         }
     }
 
@@ -407,13 +421,10 @@ public class AllureReportService {
             Path allureResultsDir = getResultsPath(runId).resolve("allure-results");
             if (!Files.exists(allureResultsDir)) return;
 
-            String buildName = "Run " + runId.toString().substring(0, 8);
-            String env = request.getEnvironment() != null ? request.getEnvironment() : "unknown";
-            String tags = request.getTags() != null ? String.join(", ", request.getTags()) : "";
-            String reportName = String.format("%s [%s] %s", buildName, env, tags);
+            String runName = RunName.of(LocalDate.now(), runId, request.getEnvironment(), request.getTags());
 
             Files.writeString(allureResultsDir.resolve("executor.json"),
-                    buildExecutorJson(buildName, System.currentTimeMillis(), reportName, runId.toString()));
+                    buildExecutorJson(runName, System.currentTimeMillis(), runName, runId.toString()));
         } catch (IOException e) {
             log.warn("Failed to write executor.json for runId={}", runId, e);
         }

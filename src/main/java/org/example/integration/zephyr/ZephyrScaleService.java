@@ -8,6 +8,7 @@ import org.example.cucumber.model.TestStatus;
 import org.example.integration.jira.JiraClient;
 import org.example.integration.model.*;
 import org.example.utils.ConfigReader;
+import org.example.utils.RunName;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -16,7 +17,6 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -25,7 +25,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ZephyrScaleService {
 
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final String DEFAULT_BASE_URL = "https://jira.yourcompany.com";
 
     private final ZephyrScaleClient zephyrClient;
@@ -206,10 +205,7 @@ public class ZephyrScaleService {
 
     private String createCycle(UUID runId, TestExecutionRequest request, String projectKey,
                                List<String> testCaseKeys) {
-        String shortRunId = runId.toString().substring(0, 8);
-        String tags = request.getTags() != null ? String.join(" ", request.getTags()) : "";
-        String date = LocalDate.now().format(DATE_FMT);
-        String cycleName = (date + " " + shortRunId + (tags.isBlank() ? "" : " " + tags)).trim();
+        String cycleName = RunName.of(LocalDate.now(), runId, request.getEnvironment(), request.getTags());
 
         String folder = resolveResultFolder(request);
         Map<String, Object> body = new HashMap<>();

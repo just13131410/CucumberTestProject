@@ -612,7 +612,7 @@ curl -X POST http://localhost:8080/api/v1/test/report/combined/generate \
 - Der Report ist sofort unter der zurückgegebenen URL im Browser aufrufbar
 - Bei erneuter Generierung wird der vorherige kombinierte Report überschrieben
 - Nützlich für Sprint-Reports oder teamübergreifende Auswertungen
-- Im Report werden die einzelnen Runs als Suites gruppiert, z.B. `Run a76c4874 @Backend, @smoke` - so ist sofort erkennbar, welche Tags bei welchem Lauf verwendet wurden
+- Im Report werden die einzelnen Runs als Suites gruppiert, z.B. `20260223 [staging] a76c4874 @Backend @smoke` - so ist sofort erkennbar, gegen welche Umgebung und mit welchen Tags ein Lauf lief. Es ist derselbe Name wie beim Zephyr-Test-Cycle und im Allure-Report des einzelnen Laufs. Die Suites sind nach Startzeit sortiert, der neueste Lauf steht oben
 - Jeder Testfall erscheint pro Run einzeln (keine Deduplizierung), sodass alle Ausführungen sichtbar sind
 
 **Fehler:**
@@ -777,6 +777,9 @@ Tag-Ausdrücke mit `and`, `not` oder Klammern werden abgelehnt (400).
   `zephyr.outline-rows-as-test-data=true` setzen: Dann wird der Schritt-Status je Zeile fortlaufend
   gesendet. Die Reihenfolge der `Examples`-Zeilen muss der der Zephyr-Datenzeilen entsprechen.
 - Ein fehlgeschlagener Before-/After-Hook (z.B. Screenshot) führt ebenfalls zu `Fail`.
+- Name des angelegten Test-Cycles: `<yyyyMMdd> [<environment>] <runId, 8 Zeichen> <tags>`,
+  z.B. `20260223 [staging] abc12345 @SmokeTest`. Läufe gegen verschiedene Ziel-Umgebungen sind so
+  in Zephyr direkt unterscheidbar. Die Allure-Reports (einzeln und kombiniert) verwenden denselben Namen.
 
 #### Nicht ausgeführte Testfälle in Zephyr
 

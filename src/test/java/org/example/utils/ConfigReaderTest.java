@@ -390,6 +390,69 @@ class ConfigReaderTest {
         assertTrue(result.isEmpty());
     }
 
+    // --- lookupSecret Tests (Property- und Env-Schreibweise in Secret-Dateien) ---
+
+    @Test
+    void lookupSecret_PropertyStyleKey_IsFound() {
+        Properties secrets = new Properties();
+        secrets.setProperty("zephyr.api-token", "tok");
+
+        ConfigReader.ResolvedValue result = ConfigReader.lookupSecret(secrets, "zephyr.api-token", "ZEPHYR_API_TOKEN");
+
+        assertEquals("tok", result.value());
+        assertEquals("Secret-Datei (CONFIGPATH)", result.source());
+    }
+
+    @Test
+    void lookupSecret_EnvStyleKey_IsFound() {
+        // Regression: Helm-gerenderte Secret-Datei mit ZEPHYR_API_TOKEN=... wurde geladen,
+        // der Wert aber nie gefunden, weil nur nach "zephyr.api-token" gesucht wurde.
+        Properties secrets = new Properties();
+        secrets.setProperty("ZEPHYR_API_TOKEN", " tok\r");
+
+        ConfigReader.ResolvedValue result = ConfigReader.lookupSecret(secrets, "zephyr.api-token", "ZEPHYR_API_TOKEN");
+
+        assertEquals("tok", result.value());
+        assertTrue(result.source().contains("ZEPHYR_API_TOKEN"), result.source());
+    }
+
+    @Test
+    void lookupSecret_BothStyles_PropertyStyleWins() {
+        Properties secrets = new Properties();
+        secrets.setProperty("zephyr.username", "property");
+        secrets.setProperty("ZEPHYR_USERNAME", "env");
+
+        assertEquals("property", ConfigReader.lookupSecret(secrets, "zephyr.username", "ZEPHYR_USERNAME").value());
+    }
+
+    @Test
+    void lookupSecret_BlankPropertyStyle_FallsBackToEnvStyle() {
+        Properties secrets = new Properties();
+        secrets.setProperty("zephyr.username", "  ");
+        secrets.setProperty("ZEPHYR_USERNAME", "env");
+
+        assertEquals("env", ConfigReader.lookupSecret(secrets, "zephyr.username", "ZEPHYR_USERNAME").value());
+    }
+
+    @Test
+    void lookupSecret_KeyAlreadyInEnvStyle_IsFound() {
+        Properties secrets = new Properties();
+        secrets.setProperty("AUTH_CLIENT", "client");
+
+        ConfigReader.ResolvedValue result = ConfigReader.lookupSecret(secrets, "AUTH_CLIENT", "AUTH_CLIENT");
+
+        assertEquals("client", result.value());
+        assertEquals("Secret-Datei (CONFIGPATH)", result.source());
+    }
+
+    @Test
+    void lookupSecret_NeitherStyleSet_ReturnsNull() {
+        Properties secrets = new Properties();
+        secrets.setProperty("ZEPHYR_API_TOKEN", "");
+
+        assertNull(ConfigReader.lookupSecret(secrets, "zephyr.api-token", "ZEPHYR_API_TOKEN"));
+    }
+
     private void writePropertiesFile(Path dir, String filename, String content) throws Exception {
         try (FileWriter writer = new FileWriter(new File(dir.toFile(), filename))) {
             writer.write(content);

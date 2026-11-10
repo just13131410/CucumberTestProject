@@ -94,7 +94,8 @@ public class ConfigReader {
      *   <li>Umgebungsvariable (UPPER_SNAKE_CASE, z.B. von OpenShift ConfigMap/Secret)</li>
      *   <li>System-Property (-Dkey=value)</li>
      *   <li>.env-Datei (lokale Entwicklung)</li>
-     *   <li>Secret-Dateien aus CONFIGPATH-Verzeichnis (OpenShift gemountete Secrets)</li>
+     *   <li>Secret-Dateien aus CONFIGPATH-Verzeichnis (OpenShift gemountete Secrets); Key in
+     *       Property-Schreibweise ({@code zephyr.api-token}) oder Env-Schreibweise ({@code ZEPHYR_API_TOKEN})</li>
      *   <li>config.properties (Classpath-Fallback)</li>
      *   <li>Default-Wert</li>
      * </ol>
@@ -186,16 +187,37 @@ public class ConfigReader {
             return new ResolvedValue(trim(dotenvValue), ".env-Datei");
         }
 
-        String secretValue = secretProperties.getProperty(key);
-        if (isSet(secretValue)) {
-            log.debug("Key '{}' bezogen aus: Secret-Datei (CONFIGPATH)", key);
-            return new ResolvedValue(trim(secretValue), "Secret-Datei (CONFIGPATH)");
+        ResolvedValue secretValue = lookupSecret(secretProperties, key, envKey);
+        if (secretValue != null) {
+            log.debug("Key '{}' bezogen aus: {}", key, secretValue.source());
+            return secretValue;
         }
 
         String propValue = properties.getProperty(key);
         if (isSet(propValue)) {
             log.debug("Key '{}' bezogen aus: config.properties (Classpath)", key);
             return new ResolvedValue(trim(propValue), "config.properties (Classpath)");
+        }
+        return null;
+    }
+
+    /**
+     * Sucht einen Key in den Secret-Dateien (CONFIGPATH): zuerst in Property-Schreibweise
+     * ({@code zephyr.api-token}), danach in Env-Schreibweise ({@code ZEPHYR_API_TOKEN}). Secrets
+     * werden oft aus Helm-Values im Env-Stil gerendert; ohne den zweiten Versuch würde die Datei
+     * zwar geladen, der Wert aber nie gefunden. {@code null}, wenn keine Schreibweise gesetzt ist.
+     * Package-private für Unit-Tests.
+     */
+    static ResolvedValue lookupSecret(Properties secrets, String key, String envKey) {
+        String value = secrets.getProperty(key);
+        if (isSet(value)) {
+            return new ResolvedValue(trim(value), "Secret-Datei (CONFIGPATH)");
+        }
+        if (!envKey.equals(key)) {
+            value = secrets.getProperty(envKey);
+            if (isSet(value)) {
+                return new ResolvedValue(trim(value), "Secret-Datei (CONFIGPATH, als " + envKey + ")");
+            }
         }
         return null;
     }

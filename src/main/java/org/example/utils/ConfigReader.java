@@ -7,7 +7,9 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.FileReader;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 
 public class ConfigReader {
@@ -15,7 +17,11 @@ public class ConfigReader {
     private static final Logger log = LoggerFactory.getLogger(ConfigReader.class);
     private static final Properties properties = new Properties();
     private static final Properties secretProperties;
+    private static final List<NamedProperties> springProperties;
     private static final Dotenv dotenv;
+
+    /** Eine geladene Properties-Datei samt Dateiname (für die Quellenangabe im Log). */
+    record NamedProperties(String name, Properties properties) {}
 
     static {
         // config.properties aus dem Classpath laden (Fallback-Defaults)
@@ -37,6 +43,10 @@ public class ConfigReader {
             configPath = System.getProperty("CONFIGPATH");
         }
         secretProperties = (configPath != null) ? loadSecretFiles(configPath) : new Properties();
+
+        // Spring-Konfiguration aus dem JAR (application.properties + aktive Profile) als
+        // niedrigste Quelle, damit dort gepflegte Werte nicht stillschweigend auf den Default fallen.
+        springProperties = loadSpringProperties(ConfigReader.class.getClassLoader(), activeSpringProfiles());
 
         // .env-Datei (nur lokale Entwicklung, in OpenShift nicht vorhanden)
         dotenv = Dotenv.configure()
@@ -79,6 +89,60 @@ public class ConfigReader {
         return result;
     }
 
+    /** Aktive Spring-Profile wie Spring sie auflöst: System-Property vor Umgebungsvariable. */
+    private static String activeSpringProfiles() {
+        String profiles = System.getProperty("spring.profiles.active");
+        return isSet(profiles) ? profiles : System.getenv("SPRING_PROFILES_ACTIVE");
+    }
+
+    /**
+     * Lädt {@code application.properties} und {@code application-<profil>.properties} der aktiven
+     * Profile aus dem Classpath. Ergebnis in Prioritätsreihenfolge (höchste zuerst): wie bei Spring
+     * gewinnt das zuletzt genannte Profil, Profil-Dateien gewinnen gegen {@code application.properties}.
+     * Fehlende Dateien werden übersprungen. Package-private für Unit-Tests.
+     */
+    static List<NamedProperties> loadSpringProperties(ClassLoader classLoader, String activeProfiles) {
+        List<String> fileNames = new ArrayList<>();
+        fileNames.add("application.properties");
+        if (isSet(activeProfiles)) {
+            Arrays.stream(activeProfiles.split(","))
+                    .map(String::strip)
+                    .filter(profile -> !profile.isEmpty())
+                    .forEach(profile -> fileNames.add("application-" + profile + ".properties"));
+        }
+
+        List<NamedProperties> result = new ArrayList<>();
+        for (String fileName : fileNames) {
+            try (InputStream is = classLoader.getResourceAsStream(fileName)) {
+                if (is == null) {
+                    continue;
+                }
+                Properties props = new Properties();
+                props.load(is); // ISO-8859-1 wie Spring Boot für .properties
+                result.addFirst(new NamedProperties(fileName, props));
+                log.info("Spring-Konfiguration geladen aus: Classpath ({})", fileName);
+            } catch (Exception e) {
+                log.warn("Fehler beim Laden von {}: {}", fileName, e.getMessage());
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /**
+     * Sucht einen Key in den Spring-Properties (höchste Priorität zuerst). Werte mit Platzhaltern
+     * ({@code ${...}}) werden übersprungen: die löst nur Spring auf, roh weitergereicht ergäben sie
+     * z.B. eine ungültige URL. {@code null}, wenn keine Datei den Key setzt. Package-private für Unit-Tests.
+     */
+    static ResolvedValue lookupSpring(List<NamedProperties> sources, String key) {
+        for (NamedProperties source : sources) {
+            String value = source.properties().getProperty(key);
+            if (isSet(value) && !value.contains("${")) {
+                return new ResolvedValue(trim(value), source.name() + " (Classpath)");
+            }
+        }
+        return null;
+    }
+
     /**
      * Wandelt einen Property-Key in den erwarteten Umgebungsvariablen-Namen um (z.B.
      * {@code "zephyr.api-token"} -> {@code "ZEPHYR_API_TOKEN"}), analog zu Spring Boots
@@ -97,6 +161,8 @@ public class ConfigReader {
      *   <li>Secret-Dateien aus CONFIGPATH-Verzeichnis (OpenShift gemountete Secrets); Key in
      *       Property-Schreibweise ({@code zephyr.api-token}) oder Env-Schreibweise ({@code ZEPHYR_API_TOKEN})</li>
      *   <li>config.properties (Classpath-Fallback)</li>
+     *   <li>application-&lt;profil&gt;.properties der aktiven Spring-Profile, dann application.properties
+     *       (Classpath, ohne {@code ${...}}-Platzhalter)</li>
      *   <li>Default-Wert</li>
      * </ol>
      * Leere bzw. nur aus Whitespace bestehende Werte gelten als nicht gesetzt, es greift die nächste
@@ -197,6 +263,12 @@ public class ConfigReader {
         if (isSet(propValue)) {
             log.debug("Key '{}' bezogen aus: config.properties (Classpath)", key);
             return new ResolvedValue(trim(propValue), "config.properties (Classpath)");
+        }
+
+        ResolvedValue springValue = lookupSpring(springProperties, key);
+        if (springValue != null) {
+            log.debug("Key '{}' bezogen aus: {}", key, springValue.source());
+            return springValue;
         }
         return null;
     }

@@ -6,7 +6,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.FileWriter;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -451,6 +454,81 @@ class ConfigReaderTest {
         secrets.setProperty("ZEPHYR_API_TOKEN", "");
 
         assertNull(ConfigReader.lookupSecret(secrets, "zephyr.api-token", "ZEPHYR_API_TOKEN"));
+    }
+
+    // --- Spring-Properties (application.properties + Profile aus dem Classpath) ---
+
+    @Test
+    void get_FallsBackToApplicationProperties_WhenNoOtherSourceSetsKey() {
+        // Regression: zephyr.base-url stand nur in application.properties und fiel auf den Default.
+        ConfigReader.ResolvedValue result = ConfigReader.getWithSource("zephyr.default-project-key", "default");
+
+        assertEquals("PROJ", result.value());
+        assertEquals("application.properties (Classpath)", result.source());
+    }
+
+    @Test
+    void loadSpringProperties_LastProfileWinsOverEarlierProfileAndBaseFile(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "application.properties", "shared=base\nbase.only=b");
+        writePropertiesFile(tempDir, "application-a.properties", "shared=a\na.only=a");
+        writePropertiesFile(tempDir, "application-b.properties", "shared=b");
+
+        List<ConfigReader.NamedProperties> sources = loadFrom(tempDir, " a , b ");
+
+        assertEquals(List.of("application-b.properties", "application-a.properties", "application.properties"),
+                sources.stream().map(ConfigReader.NamedProperties::name).toList());
+        assertEquals("b", ConfigReader.lookupSpring(sources, "shared").value());
+        assertEquals("a", ConfigReader.lookupSpring(sources, "a.only").value());
+        assertEquals("b", ConfigReader.lookupSpring(sources, "base.only").value());
+    }
+
+    @Test
+    void loadSpringProperties_MissingProfileFileIsSkipped(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "application.properties", "key=base");
+
+        List<ConfigReader.NamedProperties> sources = loadFrom(tempDir, "unknown");
+
+        assertEquals(1, sources.size());
+        assertEquals("base", ConfigReader.lookupSpring(sources, "key").value());
+    }
+
+    @Test
+    void loadSpringProperties_NoProfile_LoadsOnlyBaseFile(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "application.properties", "key=base");
+        writePropertiesFile(tempDir, "application-dev.properties", "key=dev");
+
+        assertEquals("base", ConfigReader.lookupSpring(loadFrom(tempDir, null), "key").value());
+    }
+
+    @Test
+    void lookupSpring_BlankProfileValue_FallsBackToBaseFile(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "application.properties", "key=base");
+        writePropertiesFile(tempDir, "application-prod.properties", "key=");
+
+        ConfigReader.ResolvedValue result = ConfigReader.lookupSpring(loadFrom(tempDir, "prod"), "key");
+
+        assertEquals("base", result.value());
+        assertEquals("application.properties (Classpath)", result.source());
+    }
+
+    @Test
+    void lookupSpring_PlaceholderValue_IsIgnored(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "application.properties", "url=${ZEPHYR_URL:https://x}");
+
+        assertNull(ConfigReader.lookupSpring(loadFrom(tempDir, null), "url"));
+    }
+
+    @Test
+    void lookupSpring_UnknownKey_ReturnsNull(@TempDir Path tempDir) throws Exception {
+        writePropertiesFile(tempDir, "application.properties", "key=base");
+
+        assertNull(ConfigReader.lookupSpring(loadFrom(tempDir, null), "other"));
+    }
+
+    private List<ConfigReader.NamedProperties> loadFrom(Path dir, String profiles) throws Exception {
+        try (URLClassLoader classLoader = new URLClassLoader(new URL[]{dir.toUri().toURL()}, null)) {
+            return ConfigReader.loadSpringProperties(classLoader, profiles);
+        }
     }
 
     private void writePropertiesFile(Path dir, String filename, String content) throws Exception {

@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+import java.util.TreeSet;
 
 public class ConfigReader {
 
@@ -81,7 +82,9 @@ public class ConfigReader {
                 Properties fileProp = new Properties();
                 fileProp.load(reader);
                 result.putAll(fileProp);
-                log.info("Secrets geladen aus: {}", file.getAbsolutePath());
+                // Nur Key-Namen loggen (nie Werte): zeigt, ob die erwartete Schreibweise ankommt.
+                log.info("Secrets geladen aus: {} (Keys: {})", file.getAbsolutePath(),
+                        new TreeSet<>(fileProp.stringPropertyNames()));
             } catch (Exception e) {
                 log.warn("Fehler beim Laden der Secret-Datei {}: {}", file.getName(), e.getMessage());
             }

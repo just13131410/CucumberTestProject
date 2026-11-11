@@ -134,7 +134,7 @@ cp -r /f/Dokumente/Dev/GUIProjekt/guiprojekt/dist/guiprojekt/browser "$GD/"
 nerdctl -n k8s.io build -t angular-gui:latest "$GD"
 
 # Playwright-Server (Version = Maven-Dependency playwright im pom.xml!)
-nerdctl -n k8s.io build -t playwright-server:1.58.0 k8s/playwright-server
+nerdctl -n k8s.io build -t playwright-server:1.64.0 k8s/playwright-server
 
 kubectl apply -f k8s/40-angular-gui.yaml -f k8s/20-app.yaml
 ```

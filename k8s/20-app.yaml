@@ -177,7 +177,7 @@ spec:
         # NetworkPolicies zwischen Pods spielen dafür keine Rolle. Browser-Speicher hat ein
         # eigenes Limit und belastet nicht mehr die 2-Gi-cgroup der JVM.
         - name: playwright-server
-          image: playwright-server:1.58.0
+          image: playwright-server:1.64.0
           imagePullPolicy: IfNotPresent
           # exec statt httpGet: Der Server lauscht nur auf 127.0.0.1, der Kubelet erreicht ihn von
           # außen nicht. GET / liefert 200 "Running". Bewusst keine readinessProbe: ein nicht

@@ -20,8 +20,8 @@ bereit. Die Verbindung läuft über `localhost` und verlässt den Pod nicht. Lok
 
 | # | Was | Von wem | Wofür |
 |---|-----|---------|-------|
-| 1 | Pull-Zugriff auf `mcr.microsoft.com/playwright:v1.58.0-noble`, als Spiegel in Artifactory/Nexus oder als Remote-Repo | Plattform-/Registry-Team | Basis-Image des Sidecars |
-| 2 | Build-Weg mit Zugriff auf npm-Registry und Ubuntu-apt (direkt oder über Artifactory-Remote-Repos) | Plattform-Team / CI | `npm install -g playwright@1.58.0` und `dumb-init` beim Image-Build |
+| 1 | Pull-Zugriff auf `mcr.microsoft.com/playwright:v1.64.0-noble`, als Spiegel in Artifactory/Nexus oder als Remote-Repo | Plattform-/Registry-Team | Basis-Image des Sidecars |
+| 2 | Build-Weg mit Zugriff auf npm-Registry und Ubuntu-apt (direkt oder über Artifactory-Remote-Repos) | Plattform-Team / CI | `npm install -g playwright@1.64.0` und `dumb-init` beim Image-Build |
 | 3 | Push-Ziel für zwei Images (`cucumber-test-service`, `playwright-server`) | Registry-Team | Ausrollen per ArgoCD |
 | 4 | Namespace-Quota für zusätzlich ca. 1 Gi Request / 3 Gi Limit RAM und 0,5 bis 2 CPU | OpenShift-Admin | Sidecar inkl. Chromium |
 | 5 | **Egress-Freigabe des Pods** zum Testziel (Angular-App), zu Zephyr/Jira und zu DNS | Netzwerk/Plattform | siehe Abschnitt 5 |
@@ -38,13 +38,13 @@ Zur Laufzeit braucht der Sidecar **keinen** Internetzugang: Browser und npm-Pake
 ### 2.1 Playwright-Server (Sidecar)
 
 Quelle: `k8s/playwright-server/Dockerfile`. Die Version muss zur Maven-Dependency
-`com.microsoft.playwright:playwright` im `pom.xml` passen (aktuell **1.58.0**), sonst lehnt der Server die
+`com.microsoft.playwright:playwright` im `pom.xml` passen (aktuell **1.64.0**), sonst lehnt der Server die
 Verbindung mit einem Protokollfehler ab. Bei einem Playwright-Upgrade also **immer beide** anheben.
 
 Ohne Internet im Build die Quellen auf Artifactory umbiegen, z.B.:
 
 ```dockerfile
-FROM artifactory.example.com/mcr-remote/playwright:v1.58.0-noble
+FROM artifactory.example.com/mcr-remote/playwright:v1.64.0-noble
 # npm über Artifactory-Remote-Repo
 RUN npm config set registry https://artifactory.example.com/api/npm/npm-remote/
 ```
@@ -53,10 +53,10 @@ Ist apt nicht erreichbar, kann `dumb-init` entfallen: Die `apt-get`-Zeile entfer
 `["playwright", "run-server"]` setzen. `dumb-init` sammelt nur verwaiste Prozesse ein. Playwright beendet
 seine Browser selbst; auf k3s waren nach jedem Lauf 0 Chromium-Prozesse übrig.
 
-**Tag:** unveränderlich, z.B. `playwright-server:1.58.0`. Kein `latest`, denn ArgoCD erkennt ein neues `latest` nicht.
+**Tag:** unveränderlich, z.B. `playwright-server:1.64.0`. Kein `latest`, denn ArgoCD erkennt ein neues `latest` nicht.
 
 Optional als OpenShift-`BuildConfig` (Docker-Strategie) mit dem Dockerfile aus dem Repo. Dann übernimmt die
-interne Registry das Image (`image-registry.openshift-image-registry.svc:5000/test-automation/playwright-server:1.58.0`).
+interne Registry das Image (`image-registry.openshift-image-registry.svc:5000/test-automation/playwright-server:1.64.0`).
 
 ### 2.2 App-Image
 

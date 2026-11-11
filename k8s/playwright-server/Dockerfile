@@ -8,7 +8,7 @@
 #
 # WICHTIG: Version muss zur Maven-Dependency com.microsoft.playwright:playwright (pom.xml)
 # passen (Major.Minor), sonst lehnt der Server die Verbindung mit einem Protokollfehler ab.
-ARG PLAYWRIGHT_VERSION=1.58.0
+ARG PLAYWRIGHT_VERSION=1.64.0
 FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
 ARG PLAYWRIGHT_VERSION
 

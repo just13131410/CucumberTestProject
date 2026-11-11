@@ -33,7 +33,7 @@ public class BrowserConfig {
     }
 
     public boolean isHeadless() {
-        return headless;
+        return HeadlessOverride.current(headless);
     }
 
     /** Gibt zusätzliche Browser-Launch-Argumente zurück (z.B. für Container-Umgebungen). */

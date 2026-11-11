@@ -224,7 +224,7 @@ public class MeineUISteps extends BasePage {
 }
 ```
 
-`BasePage` stellt die geschützten Felder `page` (Playwright `Page`) und `browser` (Playwright `Browser`) bereit und öffnet den Browser immer im Headless-Modus.
+`BasePage` stellt die geschützten Felder `page` (Playwright `Page`) und `browser` (Playwright `Browser`) bereit und öffnet den Browser headless oder sichtbar je nach `browser.headless` (Profil `dev`: sichtbar) bzw. dem Request-Feld `headless`.
 
 **Unterstützte Browser:**
 

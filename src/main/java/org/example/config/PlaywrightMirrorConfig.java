@@ -18,18 +18,6 @@ public final class PlaywrightMirrorConfig {
     /** Default-Adresse des internen Playwright-Mirrors (siehe /etc/hosts bzw. OpenShift-Service). */
     public static final String DEFAULT_DOWNLOAD_HOST = "http://playwright-mirror:10123";
 
-    /**
-     * Pfad-Präfix, unter dem der Mirror die Chrome-for-Testing-Binaries (Chromium +
-     * Headless-Shell) ausliefert und intern nach {@code storage.googleapis.com/
-     * chrome-for-testing-public/...} weiterleitet.
-     * <p>
-     * Notwendig, weil Playwright bei gesetztem Download-Host für Chromium nur den kurzen
-     * Pfad {@code <version>/<platform>/chrome-*.zip} (ohne Bucket-Präfix) anhängt. Ohne
-     * diesen Präfix landet der Request im Firefox/WebKit-Fallback des Mirrors (Microsoft-
-     * Origin) und wird mit HTTP 400 abgelehnt.
-     */
-    public static final String CHROME_FOR_TESTING_PATH = "builds/cft";
-
     private PlaywrightMirrorConfig() {
     }
 
@@ -59,17 +47,14 @@ public final class PlaywrightMirrorConfig {
     /**
      * Download-Host speziell für Chromium ({@code PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST}).
      * <p>
-     * Ein explizit gesetzter Wert (Config/Env {@code playwright.chromium.download.host} bzw.
-     * {@code PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST}) hat Vorrang; andernfalls wird er aus
-     * {@link #downloadHost()} + {@code /}{@value #CHROME_FOR_TESTING_PATH} abgeleitet, damit
-     * Chromium-Downloads auf die Chrome-for-Testing-Route des Mirrors zeigen.
+     * Nur ein explizit gesetzter Wert (Config/Env {@code playwright.chromium.download.host} bzw.
+     * {@code PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST}), sonst {@code null}: Playwright (ab 1.64) baut die
+     * Chromium-URL dann selbst als {@code {downloadHost}/builds/cft/<version>/<platform>/…}. Ein
+     * früher abgeleiteter {@code {host}/builds/cft} würde den Präfix verdoppeln.
      */
     public static String chromiumDownloadHost() {
         String explicit = ConfigReader.get("playwright.chromium.download.host", "");
-        if (explicit != null && !explicit.isBlank()) {
-            return explicit.trim();
-        }
-        return stripTrailingSlash(downloadHost()) + "/" + CHROME_FOR_TESTING_PATH;
+        return (explicit == null || explicit.isBlank()) ? null : explicit.trim();
     }
 
     /**
@@ -117,16 +102,5 @@ public final class PlaywrightMirrorConfig {
             return defaultValue;
         }
         return Boolean.parseBoolean(value.trim());
-    }
-
-    private static String stripTrailingSlash(String url) {
-        if (url == null) {
-            return null;
-        }
-        String trimmed = url.trim();
-        while (trimmed.endsWith("/")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 1);
-        }
-        return trimmed;
     }
 }

@@ -24,8 +24,9 @@ data:
   #   http://playwright-mirror.<mirror-namespace>.svc:10123
   # Alternativ die LAN-IP des Mirror-Hosts (Podman auf Windows), siehe Artifactory/README.md.
   PLAYWRIGHT_DOWNLOAD_HOST: "http://playwright-mirror.playwright-mirror.svc:10123"
-  # Chromium-spezifischer Host (PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST) wird vom Service automatisch
-  # aus PLAYWRIGHT_DOWNLOAD_HOST + "/builds/cft" abgeleitet – nur bei abweichendem Mirror setzen.
+  # Chromium-spezifischer Host (PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST) nicht setzen: Playwright lädt
+  # Chromium über PLAYWRIGHT_DOWNLOAD_HOST + "/builds/cft/<version>/..." – nur bei abweichendem
+  # Chromium-Host setzen, dann ohne "/builds/cft".
   # Persistenter Browser-Cache (PVC-Mount) → Reuse über Pod-Restarts, Re-Download nur bei neuer Version.
   PLAYWRIGHT_BROWSERS_PATH: "/ms-playwright"
   # Browser (Default Chromium) bereits beim Pod-Start laden.

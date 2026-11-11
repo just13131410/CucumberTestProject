@@ -76,19 +76,19 @@ class PlaywrightMirrorConfigTest {
     }
 
     @Test
-    void chromiumDownloadHost_DerivedFromBaseWithCftPrefix() {
-        assumeNoDownloadHostEnvVar();
+    void chromiumDownloadHost_NotDerivedFromBaseHost() {
+        // Playwright >= 1.64 hängt builds/cft/ selbst an; ein abgeleiteter {host}/builds/cft
+        // ergäbe .../builds/cft/builds/cft/... → ohne explizite Angabe kein Chromium-Host.
+        assumeTrue(System.getenv("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST") == null);
         System.setProperty("playwright.download.host", "http://custom-mirror:9999");
-        assertEquals("http://custom-mirror:9999/builds/cft",
-                PlaywrightMirrorConfig.chromiumDownloadHost());
+        assertNull(PlaywrightMirrorConfig.chromiumDownloadHost());
     }
 
     @Test
-    void chromiumDownloadHost_StripsTrailingSlashOnBase() {
-        assumeNoDownloadHostEnvVar();
-        System.setProperty("playwright.download.host", "http://custom-mirror:9999/");
-        assertEquals("http://custom-mirror:9999/builds/cft",
-                PlaywrightMirrorConfig.chromiumDownloadHost());
+    void chromiumDownloadHost_BlankMeansNotSet() {
+        assumeTrue(System.getenv("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST") == null);
+        System.setProperty("playwright.chromium.download.host", "  ");
+        assertNull(PlaywrightMirrorConfig.chromiumDownloadHost());
     }
 
     @Test

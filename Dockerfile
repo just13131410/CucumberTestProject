@@ -68,8 +68,8 @@ ENV TEST_RESULTS_PATH=/app/test-results
 
 # Playwright-Browser-Download über den internen Mirror (keine Internet-Verbindung im Pod nötig).
 # Diese Defaults können per OpenShift-ConfigMap überschrieben werden.
-#   PLAYWRIGHT_DOWNLOAD_HOST  → mirror.enabled/host (Chromium-Host wird intern als
-#                               {host}/builds/cft abgeleitet)
+#   PLAYWRIGHT_DOWNLOAD_HOST  → mirror.enabled/host (Chromium hängt Playwright selbst als
+#                               {host}/builds/cft/<version>/... an)
 #   PLAYWRIGHT_BROWSERS_PATH  → persistenter Cache (PVC-Mount, Reuse über Pod-Restarts)
 ENV PLAYWRIGHT_MIRROR_ENABLED=true
 ENV PLAYWRIGHT_DOWNLOAD_HOST=http://playwright-mirror:10123

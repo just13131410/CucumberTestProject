@@ -66,4 +66,21 @@ public abstract class BasePage {
         return page;
     }
 
+    /**
+     * Schließt nach einem fehlgeschlagenen Start den Playwright-Treiber, bevor neu versucht wird
+     * ({@code BrowserLaunchGuard}); sonst verwaist der Node-Prozess, weil das Feld überschrieben wird.
+     */
+    protected void closeQuietly() {
+        if (playwright != null) {
+            try {
+                playwright.close();
+            } catch (RuntimeException ignored) {
+                // Treiber ist nach einem Fehlstart ggf. schon beendet
+            }
+        }
+        playwright = null;
+        browser = null;
+        page = null;
+    }
+
 }

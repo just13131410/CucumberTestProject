@@ -9,7 +9,7 @@ import io.cucumber.java.de.Dann;
 import io.cucumber.java.de.Wenn;
 import io.cucumber.java.de.Und;
 import org.example.config.BrowserConfig;
-import org.example.config.PlaywrightBrowserInstaller;
+import org.example.config.BrowserLaunchGuard;
 import org.example.hooks.AxeReportHook;
 import org.example.pages.BasePage;
 import org.example.utils.ConfigReader;
@@ -25,12 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class DashboardSteps extends BasePage {
 
     private final String baseUrl = ConfigReader.get("baseUrl", "http://localhost:4200/");
-    private final PlaywrightBrowserInstaller browserInstaller;
+    private final BrowserLaunchGuard launchGuard;
     private Scenario currentScenario;
 
-    public DashboardSteps(PlaywrightBrowserInstaller browserInstaller, BrowserConfig browserConfig) {
+    public DashboardSteps(BrowserLaunchGuard launchGuard, BrowserConfig browserConfig) {
         super(browserConfig);
-        this.browserInstaller = browserInstaller;
+        this.launchGuard = launchGuard;
     }
 
     /** Browser nur für GUI-Szenarien; muss zu {@code test.execution.browser-tags} passen. */
@@ -38,8 +38,8 @@ public class DashboardSteps extends BasePage {
     public void setUp(Scenario scenario) {
         this.currentScenario = scenario;
         String browserName = System.getProperty("browser");
-        browserInstaller.ensureInstalled(browserName);
-        page = createPlaywrightPageInstance(browserName);
+        // Installiert über den Mirror und lädt einen fehlenden Browser einmal nach (siehe BrowserLaunchGuard).
+        page = launchGuard.launch(browserName, () -> createPlaywrightPageInstance(browserName), this::closeQuietly);
     }
 
     @After("@GUI")
